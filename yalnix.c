@@ -12,14 +12,18 @@ struct pfn_list_entry {
 	struct pfn_list_entry *next;
 };
 
-struct page_table {
-	struct pte pte_entries[PAGE_TABLE_LEN];
-};
+// struct page_table {
+// 	struct pte pte_entries[PAGE_TABLE_LEN];
+// };
 
 int virtual_memory;
 void *kernel_brk;
 
 void *interrupt_vector[TRAP_VECTOR_SIZE];
+struct pte r0_page_table[PAGE_TABLE_LEN];
+struct pte r1_page_table[PAGE_TABLE_LEN];
+
+
 // void (*interrupt_vector[TRAP_VECTOR_SIZE])(ExceptionInfo)
 // struct pfn_list free_pfn_list = malloc(pmem_size  / PAGESIZE * sizeof(struct pfn));
 
@@ -33,6 +37,13 @@ void trap_tty_receive_handler(ExceptionInfo *info);
 void trap_tty_transmit_handler(ExceptionInfo *info);
 int SetKernelBrk(void *addr);
 
+struct pte entry;
+int used_pages_min;
+int used_pages_max;
+struct pfn_list_entry free_pfn_head;
+int _i;
+struct pfn_list_entry list_entry;
+unsigned int prot;
 
 
 void
@@ -56,32 +67,68 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	WriteRegister(REG_VECTOR_BASE, (RCS421RegVal) interrupt_vector);
 
 
-	// struct pfn_list free_pfn_list = malloc(pmem_size  / PAGESIZE * sizeof(struct pfn));
 
 	// DETERMINE ALREADY USED PAGES
-	int used_pages_min = DOWN_TO_PAGE(VMEM_1_BASE);
-	int used_pages_max = UP_TO_PAGE(orig_brk);
-	TracePrintf(1, "%d\n", used_pages_min);
-	TracePrintf(1, "%d\n", used_pages_max);
+	used_pages_min = DOWN_TO_PAGE(VMEM_1_BASE) / PAGESIZE;
+	used_pages_max = UP_TO_PAGE(orig_brk) / PAGESIZE;
+	TracePrintf(1, "VMEM_1_BASE: %x\n", VMEM_1_BASE);
+	TracePrintf(1, "orig_brk: %x\n", orig_brk);
+	TracePrintf(1, "KERNEL_STACK_BASE: %x\n", KERNEL_STACK_BASE);
+	TracePrintf(1, "Used pages min: %d\n", used_pages_min);
+	TracePrintf(1, "Used pages max: %d\n", used_pages_max);
 	// USED PAGES -> VEM_BASE_1 down to page, and orig_brk up to page
 
 	// CREATE THE HEAD OF THE FREE LIST
-	struct pfn_list_entry free_pfn_head;
 	free_pfn_head.pfn = 0;
 	// free_pfn_head.next = NULL;
 
+	//INITIALIZE Region 1 PAGE TABLE
+
+	TracePrintf(1, "r0_page_table addr: %x\n", r0_page_table);
+	TracePrintf(1, "r1_page_table addr: %x\n", r1_page_table);
+
 	// CREATE THE FREE LIST
-	int i;
-	for (i = MEM_INVALID_PAGES; i < pmem_size / PAGESIZE; i++) {
-		if (i > used_pages_min || i < used_pages_max) {
-			struct pfn_list_entry entry;
-			entry.pfn = i;
-			entry.next = &free_pfn_head;
-			free_pfn_head = entry;
+	for (_i = MEM_INVALID_PAGES; _i < pmem_size / PAGESIZE; _i++) {
+		if (_i < used_pages_min || _i > used_pages_max) {
+			list_entry.pfn = _i;
+			list_entry.next = &free_pfn_head;
+			free_pfn_head = list_entry;
+		} else {
+			TracePrintf(1, "PTE %d\n", _i);
+			entry.pfn = _i;
+			entry.valid = 1;
+			if (_i < UP_TO_PAGE(&_etext) / PAGESIZE) {
+				prot = PROT_READ|PROT_EXEC;
+			} else {
+				prot = PROT_READ|PROT_WRITE;
+			}
+			entry.uprot = PROT_NONE;
+			entry.kprot = prot;
+			r1_page_table[_i - used_pages_min] = entry;
 		}
 	}
 
+	for (_i = 0; _i < used_pages_min; _i ++) {
+		// TracePrintf(1, "%d\n", _i);
+		entry.pfn = _i;
+		if (_i < KERNEL_STACK_BASE / PAGESIZE) {
+			entry.valid = 0;
+			entry.kprot = PROT_READ;
+			entry.uprot = PROT_READ|PROT_WRITE; // NOT SURE WHERE TEXT IS
+		} else {
+			entry.valid = 1;
+			entry.kprot = PROT_READ|PROT_WRITE;
+			entry.uprot = PROT_NONE;
+		}
+		r0_page_table[_i] = entry;
+	}
+
+	WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
+	WriteRegister(REG_PTR1, (RCS421RegVal) r1_page_table);
+	TracePrintf(1, "About to enable virtual memory\n");
 	WriteRegister(REG_VM_ENABLE, (RCS421RegVal) 1);
+	virtual_memory = 1;
+	TracePrintf(1, "End of Kernel Start\n");
 }
 
 int
