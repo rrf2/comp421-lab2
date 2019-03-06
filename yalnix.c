@@ -1,45 +1,56 @@
 #include <comp421/hardware.h>
 #include <comp421/yalnix.h>
+#include <stdio.h>
 
 
-struct pfn {
-	unsigned int pfn	: 20;	/* page frame number */
-}
+// struct pfn {
+// 	unsigned int pfn	: 20;	/* page frame number */
+// };
 
 struct pfn_list_entry {
-	struct pfn page_frame_number;
-	struct *pfn_list_entry next;
-}
+	unsigned int pfn	: 20;
+	struct pfn_list_entry *next;
+};
 
 struct page_table {
-	struct pte[PAGE_TABLE_LEN];
-}
+	struct pte pte_entries[PAGE_TABLE_LEN];
+};
 
 int virtual_memory;
 void *kernel_brk;
 
 void *interrupt_vector[TRAP_VECTOR_SIZE];
+// void (*interrupt_vector[TRAP_VECTOR_SIZE])(ExceptionInfo)
 // struct pfn_list free_pfn_list = malloc(pmem_size  / PAGESIZE * sizeof(struct pfn));
 
 void KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args);
+void trap_kernel_handler(ExceptionInfo *info);
+void trap_clock_handler(ExceptionInfo *info);
+void trap_illegal_handler(ExceptionInfo *info);
+void trap_memory_handler(ExceptionInfo *info);
+void trap_math_handler(ExceptionInfo *info);
+void trap_tty_receive_handler(ExceptionInfo *info);
+void trap_tty_transmit_handler(ExceptionInfo *info);
 int SetKernelBrk(void *addr);
 
 
 
 void
 KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args) {
+
+	TracePrintf(1, "Tracing\n");
 	// KEEP TRACK OF THE KERNEL BRK and VIRTUAL MEMORY FLAG
 	kernel_brk = orig_brk;
 	virtual_memory = 0;
 
 	// CREATE INrERRUPT VECTOR
-	interruptVector[TRAP_KERNEL] = trap_kernel_handler;
-	interruptVector[TRAP_CLOCK] = trap_clock_handler;
-	interruptVector[TRAP_ILLEGAL] = trap_illegal_handler;
-	interruptVector[TRAP_MEMORY] = trap_memory_handler;
-	interruptVector[TRAP_MATH] = trap_math_handler;
-	interruptVector[TRAP_TTY_RECEIVE] = trap_tty_receive_handler;
-	interruptVector[TRAP_TTY_TRANSMIT] = trap_tty_transmit_handler;
+	interrupt_vector[TRAP_KERNEL] = trap_kernel_handler;
+	interrupt_vector[TRAP_CLOCK] = trap_clock_handler;
+	interrupt_vector[TRAP_ILLEGAL] = trap_illegal_handler;
+	interrupt_vector[TRAP_MEMORY] = trap_memory_handler;
+	interrupt_vector[TRAP_MATH] = trap_math_handler;
+	interrupt_vector[TRAP_TTY_RECEIVE] = trap_tty_receive_handler;
+	interrupt_vector[TRAP_TTY_TRANSMIT] = trap_tty_transmit_handler;
 
 	// WRITE TO REG_VECTOR_BASE
 	WriteRegister(REG_VECTOR_BASE, (RCS421RegVal) interrupt_vector);
@@ -48,27 +59,29 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	// struct pfn_list free_pfn_list = malloc(pmem_size  / PAGESIZE * sizeof(struct pfn));
 
 	// DETERMINE ALREADY USED PAGES
-	struct pfn used_pages_min = DOWN_TO_PAGE(VMEM_1_BASE);
-	struct pfn used_pages_max = UP_TO_PAGE(orig_brk)
-	printf("%d", used_pages_min)
-	printf("%d", used_pages_max)
+	int used_pages_min = DOWN_TO_PAGE(VMEM_1_BASE);
+	int used_pages_max = UP_TO_PAGE(orig_brk);
+	TracePrintf(1, "%d\n", used_pages_min);
+	TracePrintf(1, "%d\n", used_pages_max);
 	// USED PAGES -> VEM_BASE_1 down to page, and orig_brk up to page
 
 	// CREATE THE HEAD OF THE FREE LIST
 	struct pfn_list_entry free_pfn_head;
 	free_pfn_head.pfn = 0;
-	free_pfn_head.next = NULL;
+	// free_pfn_head.next = NULL;
 
 	// CREATE THE FREE LIST
 	int i;
-	for (i = MEM_INVALID_PAGES; i < pmemsize / PAGESIZE; i++) {
+	for (i = MEM_INVALID_PAGES; i < pmem_size / PAGESIZE; i++) {
 		if (i > used_pages_min || i < used_pages_max) {
 			struct pfn_list_entry entry;
 			entry.pfn = i;
-			entry.next = free_pfn_head;
+			entry.next = &free_pfn_head;
 			free_pfn_head = entry;
 		}
 	}
+
+	WriteRegister(REG_VM_ENABLE, (RCS421RegVal) 1);
 }
 
 int
@@ -76,7 +89,7 @@ SetKernelBrk(void *addr) {
 	if (virtual_memory) {
 
 	} else {
-		kernel_break = addr;
+		kernel_brk = addr;
 	}
 }
 
@@ -85,7 +98,9 @@ void trap_kernel_handler(ExceptionInfo *info) {
 
 }
 
-void trap_clock_handler(ExceptionInfo *info)
+void trap_clock_handler(ExceptionInfo *info) {
+
+}
 
 void trap_illegal_handler(ExceptionInfo *info) {
 	if (info -> code == TRAP_ILLEGAL_ILLOPC) {
@@ -239,6 +254,10 @@ void trap_math_handler(ExceptionInfo *info) {
 	else { return; }
 }
 
-void trap_tty_receive_handler(ExceptionInfo *info)
+void trap_tty_receive_handler(ExceptionInfo *info) {
 
-void trap_tty_transmit_handler(ExceptionInfo *info)
+}
+
+void trap_tty_transmit_handler(ExceptionInfo *info) {
+
+}
