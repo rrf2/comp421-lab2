@@ -56,6 +56,22 @@ struct pcb {
 
 *pcb idle;
 
+unsigned int
+pfnpop() {
+	unsigned int pfn = free_pfn_head.pfn;
+	free_pfn_head = free_pfn_head.next;
+	num_free_pfn --;
+	return pfn;
+}
+
+void
+pfnpush(unsigned int pfn) {
+	struct pfn_list_entry new_pfn_entry;
+	new_pfn_entry.pfn = pfn;
+	new_pfn_entry.next = &free_pfn_head;
+	free_pfn_head = new_pfn_entry;
+	num_free_pfn ++;
+}
 
 void
 KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args) {
@@ -324,11 +340,12 @@ LoadProgram(char *name, char **args)
     	// Check to see if the memory should be freed and free the memory, setting the valid bit to 0
     	if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE || entry.pfn * PAGESIZE > KERNEL_STACK_LIMIT)) {
     		entry.valid = 0;
-    		struct pfn_list_entry new_pfn_entry;
-			new_pfn_entry.pfn = entry.pfn;
-			new_pfn_entry.next = &free_pfn_head;
-			free_pfn_head = new_pfn_entry;
-			num_free_pfn ++;
+    		pfnpush(entry.pfn);
+    		// struct pfn_list_entry new_pfn_entry;
+			// new_pfn_entry.pfn = entry.pfn;
+			// new_pfn_entry.next = &free_pfn_head;
+			// free_pfn_head = new_pfn_entry;
+			// num_free_pfn ++;
     	}
     }
 
@@ -340,34 +357,67 @@ LoadProgram(char *name, char **args)
      *  from the file.  We then change them read/execute.
      */
 
-    >>>> Leave the first MEM_INVALID_PAGES number of PTEs in the
-    >>>> Region 0 page table unused (and thus invalid)
+    // >>>> Leave the first MEM_INVALID_PAGES number of PTEs in the
+    // >>>> Region 0 page table unused (and thus invalid)
+
+    int pte = 0;
+    for (i=0; i<MEM_INVALID_PAGES;i++) {
+    	r0_page_table[pte].valid = 0;
+    	pte ++;
+    }
 
     /* First, the text pages */
-    >>>> For the next text_npg number of PTEs in the Region 0
-    >>>> page table, initialize each PTE:
-    >>>>     valid = 1
-    >>>>     kprot = PROT_READ | PROT_WRITE
-    >>>>     uprot = PROT_READ | PROT_EXEC
-    >>>>     pfn   = a new page of physical memory
+    // >>>> For the next text_npg number of PTEs in the Region 0
+    // >>>> page table, initialize each PTE:
+    // >>>>     valid = 1
+    // >>>>     kprot = PROT_READ | PROT_WRITE
+    // >>>>     uprot = PROT_READ | PROT_EXEC
+    // >>>>     pfn   = a new page of physical memory
+    for (i=0; i<text_npg; i++) {
+    	r0_page_table[pte].valid = 1;
+    	r0_page_table[pte].kprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[pte].uprot = PROT_READ | PROT_EXEC;
+    	r0_page_table[pte].pfn = pfnpop();
+    	pte ++;
+    	// free_pfn_head.pfn;
+    	// free_pfn_head = free_pfn_head.next;
+    	// num_free_pfn --;
+    }
 
-    /* Then the data and bss pages */
-    >>>> For the next data_bss_npg number of PTEs in the Region 0
-    >>>> page table, initialize each PTE:
-    >>>>     valid = 1
-    >>>>     kprot = PROT_READ | PROT_WRITE
-    >>>>     uprot = PROT_READ | PROT_WRITE
-    >>>>     pfn   = a new page of physical memory
+
+    // /* Then the data and bss pages */
+    // >>>> For the next data_bss_npg number of PTEs in the Region 0
+    // >>>> page table, initialize each PTE:
+    // >>>>     valid = 1
+    // >>>>     kprot = PROT_READ | PROT_WRITE
+    // >>>>     uprot = PROT_READ | PROT_WRITE
+    // >>>>     pfn   = a new page of physical memory
+
+    for (i=0; i<data_bss_npg; i++) {
+    	r0_page_table[pte].valid = 1;
+    	r0_page_table[pte].kprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[pte].uprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[pte].pfn = pfnpop();
+    	pte ++;
+    }
 
     /* And finally the user stack pages */
-    >>>> For stack_npg number of PTEs in the Region 0 page table
-    >>>> corresponding to the user stack (the last page of the
-    >>>> user stack *ends* at virtual address USER_STACK_LIMIT),
-    >>>> initialize each PTE:
-    >>>>     valid = 1
-    >>>>     kprot = PROT_READ | PROT_WRITE
-    >>>>     uprot = PROT_READ | PROT_WRITE
-    >>>>     pfn   = a new page of physical memory
+    // >>>> For stack_npg number of PTEs in the Region 0 page table
+    // >>>> corresponding to the user stack (the last page of the
+    // >>>> user stack *ends* at virtual address USER_STACK_LIMIT),
+    // >>>> initialize each PTE:
+    // >>>>     valid = 1
+    // >>>>     kprot = PROT_READ | PROT_WRITE
+    // >>>>     uprot = PROT_READ | PROT_WRITE
+    // >>>>     pfn   = a new page of physical memory
+    pte = USER_STACK_LIMIT / PAGESIZE;
+    for (i=0; i<stack_npg; i++) {
+    	r0_page_table[pte].valid = 1;
+    	r0_page_table[pte].kprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[pte].uprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[pte].pfn = pfnpop();
+    	pte --;
+    }
 
     /*
      *  All pages for the new address space are now in place.  Flush
@@ -379,16 +429,16 @@ LoadProgram(char *name, char **args)
     /*
      *  Read the text and data from the file into memory.
      */
-    if (read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size)
-	!= li.text_size+li.data_size) {
-	TracePrintf(0, "LoadProgram: couldn't read for '%s'\n", name);
-	free(argbuf);
-	close(fd);
-	>>>> Since we are returning -2 here, this should mean to
-	>>>> the rest of the kernel that the current process should
-	>>>> be terminated with an exit status of ERROR reported
-	>>>> to its parent process.
-	return (-2);
+    if (read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size) != li.text_size+li.data_size) {
+		TracePrintf(0, "LoadProgram: couldn't read for '%s'\n", name);
+		free(argbuf);
+		close(fd);
+		// >>>> Since we are returning -2 here, this should mean to
+		// >>>> the rest of the kernel that the current process should
+		// >>>> be terminated with an exit status of ERROR reported
+		// >>>> to its parent process.
+		//TODO: THIS
+		return (-2);
     }
 
     close(fd);			/* we've read it all now */
@@ -397,8 +447,12 @@ LoadProgram(char *name, char **args)
      *  Now set the page table entries for the program text to be readable
      *  and executable, but not writable.
      */
-    >>>> For text_npg number of PTEs corresponding to the user text
-    >>>> pages, set each PTE's kprot to PROT_READ | PROT_EXEC.
+    // >>>> For text_npg number of PTEs corresponding to the user text
+    // >>>> pages, set each PTE's kprot to PROT_READ | PROT_EXEC.
+
+    for (pte = MEM_INVALID_PAGES; pte < MEM_INVALID_PAGES + text_npg; pte++) {
+    	r0_page_table[pte].kprot = PROT_READ | PROT_EXEC;
+    }
 
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
@@ -411,7 +465,8 @@ LoadProgram(char *name, char **args)
     /*
      *  Set the entry point in the exception frame.
      */
-    >>>> Initialize pc for the current process to (void *)li.entry
+    // >>>> Initialize pc for the current process to (void *)li.entry
+    pc = (void *)li.entry; //I JUST COPIED ABOVE?? IS THAT IT?
 
     /*
      *  Now, finally, build the argument list on the new stack.
@@ -435,9 +490,13 @@ LoadProgram(char *name, char **args)
      *  value for the PSR will make the process run in user mode,
      *  since this PSR value of 0 does not have the PSR_MODE bit set.
      */
-    >>>> Initialize regs[0] through regs[NUM_REGS-1] for the
-    >>>> current process to 0.
-    >>>> Initialize psr for the current process to 0.
+    // >>>> Initialize regs[0] through regs[NUM_REGS-1] for the
+    // >>>> current process to 0.
+    // >>>> Initialize psr for the current process to 0.
+    for(i=0; i<NUM_REGS; i++) {
+    	WriteRegister(regs[i], (RCS421RegVal) 0);
+    }
+    WriteRegister(PSR, (RCS421RegVal) 0);
 
     return (0);
 }
