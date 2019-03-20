@@ -1,6 +1,12 @@
 #include <comp421/hardware.h>
 #include <comp421/yalnix.h>
+#include <comp421/loadinfo.h>
+
 #include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
 
 
 // struct pfn {
@@ -10,6 +16,13 @@
 struct pfn_list_entry {
 	unsigned int pfn	: 20;
 	struct pfn_list_entry *next;
+};
+
+//I MADE THESE CHANGES 3/20/19 -- Lucy
+struct pcb {
+	unsigned int pid;
+	struct pte *r0_pointer;
+	//TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
 };
 
 // struct page_table {
@@ -28,6 +41,9 @@ struct pte r1_page_table[PAGE_TABLE_LEN];
 // struct pfn_list free_pfn_list = malloc(pmem_size  / PAGESIZE * sizeof(struct pfn));
 
 void KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args);
+unsigned int pfnpop();
+void pfnpush(unsigned int pfn);
+int LoadProgram(char *name, char **args, ExceptionInfo *info);
 void trap_kernel_handler(ExceptionInfo *info);
 void trap_clock_handler(ExceptionInfo *info);
 void trap_illegal_handler(ExceptionInfo *info);
@@ -45,21 +61,12 @@ int _i;
 struct pfn_list_entry list_entry;
 unsigned int prot;
 int num_free_pfn;
-
-
-//I MADE THESE CHANGES 3/20/19 -- Lucy
-struct pcb {
-	unsigned int pid;
-	struct pte *r0_pointer;
-	//TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
-}
-
-*pcb idle;
+struct pcb idle;
 
 unsigned int
 pfnpop() {
 	unsigned int pfn = free_pfn_head.pfn;
-	free_pfn_head = free_pfn_head.next;
+	free_pfn_head = *free_pfn_head.next;
 	num_free_pfn --;
 	return pfn;
 }
@@ -158,19 +165,22 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	WriteRegister(REG_VM_ENABLE, (RCS421RegVal) 1);
 	virtual_memory = 1;
 	TracePrintf(1, "Loading Program\n");
-	LoadProgram(cmd_args[0], cmd_args[1]);
-	TracePrintf(1, "End of Kernel Start\n");
 
 
 	// I MADE THESE CHANGES 3/20/19 -- Lucy
 	// IDLE PROCESS
-	idle = (pcb*) malloc(sizeof(pcb));
-	idle -> pid = 0;
-	r0_pointer -> r0_page_table;
+	// idle = (struct pcb*) malloc(sizeof(struct pcb));
+	TracePrintf(1, "-\n");
+	// idle.pid = 0;
+	TracePrintf(1, "--\n");
+	// idle.r0_pointer = r0_page_table;
 
-	LoadProgram("idle", cmd_args, frame);
+	// LoadProgram("idle", cmd_args, frame);
 
 	//TODO: create actual loop thing. Question: is this literally a sepearte c program???
+	TracePrintf(1, "cmd_args[0]: %s\n", cmd_args[0]);
+	LoadProgram(cmd_args[0], cmd_args, info);// TODO: CHECK RETURN
+	TracePrintf(1, "End of Kernel Start\n");
 
 }
 
@@ -195,7 +205,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
  *  in this case.
  */
 int
-LoadProgram(char *name, char **args)
+LoadProgram(char *name, char **args, ExceptionInfo *info)
 {
     int fd;
     int status;
@@ -257,7 +267,7 @@ LoadProgram(char *name, char **args)
      *  Now save the arguments in a separate buffer in Region 1, since
      *  we are about to delete all of Region 0.
      */
-    cp = argbuf = (char *)malloc(size);
+    cp = argbuf = (char *) malloc(size);
     for (i = 0; args[i] != NULL; i++) {
 		strcpy(cp, args[i]);
 		cp += strlen(cp) + 1;
@@ -321,7 +331,7 @@ LoadProgram(char *name, char **args)
     // >>>> Initialize sp for the current process to (char *)cpp.
     // >>>> The value of cpp was initialized above.
 
-    char *sp = (char *)cpp // I Just copied what's in the above comment
+    info->sp = (char *)cpp; // I Just copied what's in the above comment
 
 
     /*
@@ -335,7 +345,7 @@ LoadProgram(char *name, char **args)
     // >>>> any of these PTEs that are valid, free the physical memory
     // >>>> memory page indicated by that PTE's pfn field.  Set all
     // >>>> of these PTEs to be no longer valid.
-    for (i = 0; i < PAGE_TABLE_LEN) {
+    for (i = 0; i < PAGE_TABLE_LEN; i++) {
     	struct pte entry = r0_page_table[i];
     	// Check to see if the memory should be freed and free the memory, setting the valid bit to 0
     	if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE || entry.pfn * PAGESIZE > KERNEL_STACK_LIMIT)) {
@@ -466,7 +476,7 @@ LoadProgram(char *name, char **args)
      *  Set the entry point in the exception frame.
      */
     // >>>> Initialize pc for the current process to (void *)li.entry
-    pc = (void *)li.entry; //I JUST COPIED ABOVE?? IS THAT IT?
+    info->pc = (void *)li.entry; // USING THE PASSED IN EXCEPTION INFO
 
     /*
      *  Now, finally, build the argument list on the new stack.
@@ -494,9 +504,9 @@ LoadProgram(char *name, char **args)
     // >>>> current process to 0.
     // >>>> Initialize psr for the current process to 0.
     for(i=0; i<NUM_REGS; i++) {
-    	WriteRegister(regs[i], (RCS421RegVal) 0);
+    	WriteRegister(info->regs[i], (RCS421RegVal) 0);
     }
-    WriteRegister(PSR, (RCS421RegVal) 0);
+    WriteRegister(info->psr, (RCS421RegVal) 0);
 
     return (0);
 }
@@ -508,6 +518,7 @@ SetKernelBrk(void *addr) {
 	} else {
 		kernel_brk = addr;
 	}
+	return (0);
 }
 
 

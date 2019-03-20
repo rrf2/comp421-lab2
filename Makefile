@@ -21,11 +21,11 @@
 #	own test programs.
 #
 #	For each user test program, the Makefile will make the
-#	program out of a single correspondingly named sourc file.
+#	program out of a single correspondingly named source file.
 #	For example, the Makefile will make test1 out of test1.c,
 #	if you have a file named test1.c in this directory.
 #
-ALL = yalnix test1 test2 test3
+ALL = yalnix idle test1 test2 test3
 
 #
 #	You must modify the KERNEL_OBJS and KERNEL_SRCS definitions
