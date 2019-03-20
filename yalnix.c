@@ -156,8 +156,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
 	//TODO: create actual loop thing. Question: is this literally a sepearte c program???
 
-
-
 }
 
 /*
@@ -323,7 +321,15 @@ LoadProgram(char *name, char **args)
     // >>>> of these PTEs to be no longer valid.
     for (i = 0; i < PAGE_TABLE_LEN) {
     	struct pte entry = r0_page_table[i];
-
+    	// Check to see if the memory should be freed and free the memory, setting the valid bit to 0
+    	if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE || entry.pfn * PAGESIZE > KERNEL_STACK_LIMIT)) {
+    		entry.valid = 0;
+    		struct pfn_list_entry new_pfn_entry;
+			new_pfn_entry.pfn = entry.pfn;
+			new_pfn_entry.next = &free_pfn_head;
+			free_pfn_head = new_pfn_entry;
+			num_free_pfn ++;
+    	}
     }
 
     /*
