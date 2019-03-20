@@ -47,6 +47,16 @@ unsigned int prot;
 int num_free_pfn;
 
 
+//I MADE THESE CHANGES 3/20/19 -- Lucy
+struct pcb {
+	unsigned int pid;
+	struct pte *r0_pointer;
+	//TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
+}
+
+*pcb idle;
+
+
 void
 KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args) {
 
@@ -134,6 +144,20 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	TracePrintf(1, "Loading Program\n");
 	LoadProgram(cmd_args[0], cmd_args[1]);
 	TracePrintf(1, "End of Kernel Start\n");
+
+
+	// I MADE THESE CHANGES 3/20/19 -- Lucy
+	// IDLE PROCESS
+	idle = (pcb*) malloc(sizeof(pcb));
+	idle -> pid = 0;
+	r0_pointer -> r0_page_table;
+
+	LoadProgram("idle", cmd_args, frame);
+
+	//TODO: create actual loop thing. Question: is this literally a sepearte c program???
+
+
+
 }
 
 /*
