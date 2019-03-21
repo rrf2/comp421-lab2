@@ -56,7 +56,7 @@ int SetKernelBrk(void *addr);
 struct pte entry;
 int used_pages_min;
 int used_pages_max;
-struct pfn_list_entry free_pfn_head;
+struct pfn_list_entry *free_pfn_head;
 int _i;
 struct pfn_list_entry list_entry;
 unsigned int prot;
@@ -65,19 +65,21 @@ struct pcb idle;
 
 unsigned int
 pfnpop() {
-	unsigned int pfn = free_pfn_head.pfn;
-	free_pfn_head = *free_pfn_head.next;
+	unsigned int pfn = free_pfn_head->pfn;
+	free_pfn_head = free_pfn_head->next;
 	num_free_pfn --;
+    TracePrintf(1, "PFNPOP - old: %d\t new: %d\t\n", pfn, free_pfn_head->pfn);
 	return pfn;
 }
 
 void
 pfnpush(unsigned int pfn) {
-	struct pfn_list_entry new_pfn_entry;
-	new_pfn_entry.pfn = pfn;
-	new_pfn_entry.next = &free_pfn_head;
+	struct pfn_list_entry *new_pfn_entry = malloc(sizeof (struct pfn_list_entry*));
+	new_pfn_entry->pfn = pfn;
+	new_pfn_entry->next = free_pfn_head;
 	free_pfn_head = new_pfn_entry;
 	num_free_pfn ++;
+    TracePrintf(1, "PUSHED PFN: %d\t next: %d\n", pfn, free_pfn_head->next->pfn);
 }
 
 void
@@ -113,7 +115,8 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	// USED PAGES -> VEM_BASE_1 down to page, and orig_brk up to page
 
 	// CREATE THE HEAD OF THE FREE LIST
-	free_pfn_head.pfn = 0;
+    free_pfn_head = malloc(sizeof (struct pfn_list_entry*));
+	free_pfn_head->pfn = 0;
 	// free_pfn_head.next = NULL;
 
 	//INITIALIZE Region 1 PAGE TABLE
@@ -124,12 +127,13 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	// CREATE THE FREE LIST AND INITIALIZE REGION 1 PAGE TABLE
 	for (_i = MEM_INVALID_PAGES; _i < pmem_size / PAGESIZE; _i++) {
 		if (_i < used_pages_min || _i > used_pages_max) {
-			num_free_pfn ++;
-			list_entry.pfn = _i;
-			list_entry.next = &free_pfn_head;
-			free_pfn_head = list_entry;
+			// num_free_pfn ++;
+			// list_entry.pfn = _i;
+			// list_entry.next = &free_pfn_head;
+			// free_pfn_head = list_entry;
+            pfnpush(_i);
 		} else {
-			TracePrintf(1, "PTE %d\n", _i);
+			// TracePrintf(1, "PTE %d\n", _i);
 			entry.pfn = _i;
 			entry.valid = 1;
 			if (_i < UP_TO_PAGE(&_etext) / PAGESIZE) {
@@ -142,6 +146,15 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 			r1_page_table[_i - used_pages_min] = entry;
 		}
 	}
+
+    for (_i = used_pages_max; _i < UP_TO_PAGE(kernel_brk) / PAGESIZE; _i++) {
+        TracePrintf(1, "Kernel Heap VPN: %d\n", _i);
+        entry.pfn = _i;
+        entry.valid = 1;
+        entry.uprot = PROT_NONE;
+        entry.kprot = PROT_READ|PROT_WRITE;
+        r1_page_table[_i - used_pages_min] = entry;
+    }
 
 	// INITIALIZE REGION 0 PAGE TABLE
 	for (_i = 0; _i < used_pages_min; _i ++) {
@@ -164,6 +177,10 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	TracePrintf(1, "About to enable virtual memory\n");
 	WriteRegister(REG_VM_ENABLE, (RCS421RegVal) 1);
 	virtual_memory = 1;
+    // Add back MEM_INVALID_PAGES
+    for (_i=0; _i<MEM_INVALID_PAGES; _i++) {
+        pfnpush(_i);
+    }
 	TracePrintf(1, "Loading Program\n");
 
 
@@ -181,7 +198,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	TracePrintf(1, "cmd_args[0]: %s\n", cmd_args[0]);
 	LoadProgram(cmd_args[0], cmd_args, info);// TODO: CHECK RETURN
 	TracePrintf(1, "End of Kernel Start\n");
-
+    return;
 }
 
 /*
@@ -330,7 +347,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
 
     // >>>> Initialize sp for the current process to (char *)cpp.
     // >>>> The value of cpp was initialized above.
-
+    TracePrintf(1, "Info addr: %x\n", &info);
     info->sp = (char *)cpp; // I Just copied what's in the above comment
 
 
@@ -348,6 +365,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     for (i = 0; i < PAGE_TABLE_LEN; i++) {
     	struct pte entry = r0_page_table[i];
     	// Check to see if the memory should be freed and free the memory, setting the valid bit to 0
+        // TracePrintf(1, "PTE num: %d\n", i);
     	if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE || entry.pfn * PAGESIZE > KERNEL_STACK_LIMIT)) {
     		entry.valid = 0;
     		pfnpush(entry.pfn);
@@ -369,11 +387,10 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
 
     // >>>> Leave the first MEM_INVALID_PAGES number of PTEs in the
     // >>>> Region 0 page table unused (and thus invalid)
-
-    int pte = 0;
+    int vpn = 0;
     for (i=0; i<MEM_INVALID_PAGES;i++) {
-    	r0_page_table[pte].valid = 0;
-    	pte ++;
+    	r0_page_table[vpn].valid = 0;
+    	vpn ++;
     }
 
     /* First, the text pages */
@@ -383,12 +400,21 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>>     kprot = PROT_READ | PROT_WRITE
     // >>>>     uprot = PROT_READ | PROT_EXEC
     // >>>>     pfn   = a new page of physical memory
+
+
+    // struct pfn_list_entry *curr = &free_pfn_head;
+    // while(curr != NULL) {
+    //     TracePrintf(1, "-- %d", curr->pfn);
+    //     curr = curr->next;
+    // }
+
     for (i=0; i<text_npg; i++) {
-    	r0_page_table[pte].valid = 1;
-    	r0_page_table[pte].kprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[pte].uprot = PROT_READ | PROT_EXEC;
-    	r0_page_table[pte].pfn = pfnpop();
-    	pte ++;
+    	r0_page_table[vpn].valid = 1;
+    	r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[vpn].uprot = PROT_READ | PROT_EXEC;
+    	r0_page_table[vpn].pfn = pfnpop();
+        TracePrintf(1, "VPN: %d\t PFN: %d\t addr: %x\n", vpn, r0_page_table[vpn].pfn, r0_page_table[vpn].pfn * PAGESIZE);
+    	vpn ++;
     	// free_pfn_head.pfn;
     	// free_pfn_head = free_pfn_head.next;
     	// num_free_pfn --;
@@ -402,13 +428,12 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>>     kprot = PROT_READ | PROT_WRITE
     // >>>>     uprot = PROT_READ | PROT_WRITE
     // >>>>     pfn   = a new page of physical memory
-
     for (i=0; i<data_bss_npg; i++) {
-    	r0_page_table[pte].valid = 1;
-    	r0_page_table[pte].kprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[pte].uprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[pte].pfn = pfnpop();
-    	pte ++;
+    	r0_page_table[vpn].valid = 1;
+    	r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[vpn].pfn = pfnpop();
+    	vpn ++;
     }
 
     /* And finally the user stack pages */
@@ -420,13 +445,14 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>>     kprot = PROT_READ | PROT_WRITE
     // >>>>     uprot = PROT_READ | PROT_WRITE
     // >>>>     pfn   = a new page of physical memory
-    pte = USER_STACK_LIMIT / PAGESIZE;
+    vpn = DOWN_TO_PAGE(USER_STACK_LIMIT) / PAGESIZE - 1;
     for (i=0; i<stack_npg; i++) {
-    	r0_page_table[pte].valid = 1;
-    	r0_page_table[pte].kprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[pte].uprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[pte].pfn = pfnpop();
-    	pte --;
+        TracePrintf(1, "User Stack vpn: %d\t%x  -  %x\n", vpn, vpn*PAGESIZE, (vpn+1)*PAGESIZE);
+    	r0_page_table[vpn].valid = 1;
+    	r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
+    	r0_page_table[vpn].pfn = pfnpop();
+    	vpn --;
     }
 
     /*
@@ -450,7 +476,6 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
 		//TODO: THIS
 		return (-2);
     }
-
     close(fd);			/* we've read it all now */
 
     /*
@@ -459,11 +484,9 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      */
     // >>>> For text_npg number of PTEs corresponding to the user text
     // >>>> pages, set each PTE's kprot to PROT_READ | PROT_EXEC.
-
-    for (pte = MEM_INVALID_PAGES; pte < MEM_INVALID_PAGES + text_npg; pte++) {
-    	r0_page_table[pte].kprot = PROT_READ | PROT_EXEC;
+    for (vpn = MEM_INVALID_PAGES; vpn < MEM_INVALID_PAGES + text_npg; vpn++) {
+    	r0_page_table[vpn].kprot = PROT_READ | PROT_EXEC;
     }
-
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
     /*
@@ -503,18 +526,34 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>> Initialize regs[0] through regs[NUM_REGS-1] for the
     // >>>> current process to 0.
     // >>>> Initialize psr for the current process to 0.
+    TracePrintf(1, "Writing to registers\n");
     for(i=0; i<NUM_REGS; i++) {
-    	WriteRegister(info->regs[i], (RCS421RegVal) 0);
+        // TracePrintf(1, "i: %d", i);
+    	info->regs[i] = 0;
     }
-    WriteRegister(info->psr, (RCS421RegVal) 0);
-
+    info->psr = 0;
+    TracePrintf(1, "Wrote to registers\n");
     return (0);
 }
 
 int
 SetKernelBrk(void *addr) {
 	if (virtual_memory) {
-
+        int num_pages_needed = UP_TO_PAGE(addr) - UP_TO_PAGE(kernel_brk);
+        for (_i = num_pages_needed; _i > 0; _i--) {
+            if (num_free_pfn <= 0) {
+                return -1;
+            }
+            unsigned int pfn = pfnpop();
+            TracePrintf(1, "Mallocing PFN: %d\n", pfn);
+            int vpn = ((unsigned long)kernel_brk - VMEM_1_BASE) / PAGESIZE;
+            r1_page_table[vpn].valid = 1;
+            r1_page_table[vpn].pfn = pfn;
+            r1_page_table[vpn].uprot = PROT_NONE;
+            r1_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+            kernel_brk = (void *) UP_TO_PAGE(pfn * PAGESIZE);
+            num_free_pfn --;
+        }
 	} else {
 		kernel_brk = addr;
 	}
@@ -616,7 +655,10 @@ void trap_illegal_handler(ExceptionInfo *info) {
 void trap_memory_handler(ExceptionInfo *info) {
 	TracePrintf(1, "Exception: Memory\n");
 	if (info -> code == TRAP_MEMORY_MAPERR) {
-		printf("%s\n", "No mapping at addr");
+		printf("%s%x\n", "No mapping at addr: ", info->addr);
+        TracePrintf(1, "addr: %x,\tpc: %x\tsp: %x\t\n", info->addr, info->pc, info->sp);
+        // TracePrintf(1, "addr: ")
+        Halt();
 		return;
 	}
 
