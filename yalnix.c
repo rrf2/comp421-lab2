@@ -20,7 +20,11 @@ struct pfn_list_entry {
 
 //I MADE THESE CHANGES 3/20/19 -- Lucy
 struct pcb {
+    char *name;
+    char **args;
+    ExceptionInfo *info;
 	unsigned int pid;
+    SavedContext *ctx;
 	struct pte *r0_pointer;
 	//TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
 };
@@ -52,6 +56,7 @@ void trap_math_handler(ExceptionInfo *info);
 void trap_tty_receive_handler(ExceptionInfo *info);
 void trap_tty_transmit_handler(ExceptionInfo *info);
 int SetKernelBrk(void *addr);
+SavedContext *MySwitchFunc(SavedContext *ctxp, void *p1, void *p2);
 
 struct pte entry;
 int used_pages_min;
@@ -67,7 +72,7 @@ struct pcb *idle;
 struct pcb *init;
 
 unsigned int pid_counter = 0;
-struct pcb *running_proc; 
+struct pcb *running_proc;
 
 unsigned int
 pfnpop() {
@@ -161,6 +166,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
         entry.kprot = PROT_READ|PROT_WRITE;
         r1_page_table[_i - used_pages_min] = entry;
     }
+    TracePrintf(1, "kernel_brk: %x\n", kernel_brk);
 
 	// INITIALIZE REGION 0 PAGE TABLE
 	for (_i = 0; _i < used_pages_min; _i ++) {
@@ -192,25 +198,38 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
 	// I MADE THESE CHANGES 3/20/19 -- Lucy
 	// IDLE PROCESS
-	// idle = malloc(sizeof (struct pcb*));
-	TracePrintf(1, "-\n");
-	// idle -> pid = pid_counter;
-	// pid_counter++;
-	TracePrintf(1, "--\n");
-	// idle -> r0_pointer = r0_page_table;
-	
+	idle = malloc(sizeof (struct pcb*));
+    TracePrintf(1, "size of next malloc: %d\n", PAGE_TABLE_LEN * sizeof(struct pte));
+	idle -> pid = pid_counter;
+	pid_counter++;
+	idle -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    idle->ctx = malloc(sizeof(SavedContext));
+    TracePrintf(1, "here2\n");
 
-	init = malloc(sizeof (struct pcb*));
+
+	init = malloc(sizeof (struct pcb));
+    TracePrintf(1, "here3\n");
 	init -> pid = pid_counter;
 	pid_counter++;
-	init -> r0_pointer = r0_page_table;
-	running_proc = init;
+	init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    memcpy(init->r0_pointer, r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
+    TracePrintf(1, "here4\n");
+
+	running_proc = idle;
 
 	TracePrintf(1, "pcb -> pid: %x\n", init -> pid);
 
-	
 	TracePrintf(1, "cmd_args[0]: %s\n", cmd_args[0]);
 	LoadProgram(cmd_args[0], cmd_args, info);// TODO: CHECK RETURN
+    TracePrintf(1, "here1.1\n");
+
+
+    TracePrintf(1, "&idle->ctx: %x\n", &idle->ctx);
+    LoadProgram("init", cmd_args, info);
+    TracePrintf(1, "kernel stack 508: %d\n", r0_page_table[508].valid);
+    TracePrintf(1, "Loaded program\n");
+    ContextSwitch(MySwitchFunc, idle->ctx, init, init);
+    TracePrintf(1, "Switched contexts\n");
 	TracePrintf(1, "End of Kernel Start\n");
     return;
 }
@@ -553,24 +572,24 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
 int
 SetKernelBrk(void *addr) {
 	if (virtual_memory) {
-        int num_pages_needed = UP_TO_PAGE(addr) - UP_TO_PAGE(kernel_brk);
+        int num_pages_needed = (UP_TO_PAGE(addr) - UP_TO_PAGE(kernel_brk)) / PAGESIZE;
+        TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", kernel_brk, addr, num_pages_needed);
         for (_i = num_pages_needed; _i > 0; _i--) {
             if (num_free_pfn <= 0) {
                 return -1;
             }
             unsigned int pfn = pfnpop();
-            TracePrintf(1, "Mallocing PFN: %d\n", pfn);
             int vpn = ((unsigned long)kernel_brk - VMEM_1_BASE) / PAGESIZE;
+            TracePrintf(1, "Mallocing VPN: %d\t to PFN: %d\n", vpn, pfn);
             r1_page_table[vpn].valid = 1;
             r1_page_table[vpn].pfn = pfn;
             r1_page_table[vpn].uprot = PROT_NONE;
             r1_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
-            kernel_brk = (void *) UP_TO_PAGE(pfn * PAGESIZE);
+            kernel_brk = VMEM_1_BASE + ((vpn + 1) * PAGESIZE);
             num_free_pfn --;
         }
-	} else {
-		kernel_brk = addr;
-	}
+    }
+	kernel_brk = addr;
 	return (0);
 }
 
@@ -578,6 +597,47 @@ int
 GetPid() {
 	TracePrintf(1, "running_proc -> pid: %\n", running_proc -> pid);
 	return running_proc -> pid;
+}
+
+SavedContext*
+MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
+    TracePrintf(1, "Context Switching\n");
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+    struct pcb *pcb1 = (struct pcb*)p1;
+    struct pcb *pcb2 = (struct pcb*)p2;
+
+    // CHECK IF PROCESS HAS RUN YET
+
+    if (&pcb1->ctx == NULL) {
+        TracePrintf(1, "Initializing PCB fields\n");
+        pcb1->ctx = malloc(sizeof(SavedContext));
+        pcb1->r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    }
+
+    // Save current r0 page table to PCB1
+    memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
+
+    // Store temp kernel stack
+    void* kernel_stackp = malloc(KERNEL_STACK_SIZE);
+    memcpy(kernel_stackp, KERNEL_STACK_BASE, KERNEL_STACK_SIZE);
+
+    // Copy new page table into current page table
+    memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+
+    // Switch register pointer
+    WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
+
+    // Copy temp kernel stack back into memory
+    memcpy(KERNEL_STACK_BASE, kernel_stackp, KERNEL_STACK_SIZE);
+
+    // Copy saved context into PCB1
+    memcpy(&pcb1->ctx, ctxp, sizeof(SavedContext));
+
+
+    // Copy current r0 page table to the page table in the PCB
+    running_proc = pcb2;
+    TracePrintf(1, "kernel stack 508: %d\n", r0_page_table[508].valid);
+    return &pcb2->ctx;
 }
 
 
