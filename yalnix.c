@@ -21,7 +21,7 @@ struct pfn_list_entry {
 //I MADE THESE CHANGES 3/20/19 -- Lucy
 struct pcb {
 	unsigned int pid;
-	struct pte *r0_pointer;
+	// struct pte *r0_pointer;
 	//TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
 };
 
@@ -61,14 +61,20 @@ int _i;
 struct pfn_list_entry list_entry;
 unsigned int prot;
 int num_free_pfn;
-struct pcb idle;
+
+
+struct pcb *idle;
+struct pcb *init;
+
+unsigned int pid_counter = 0;
+struct pcb *running_proc; 
 
 unsigned int
 pfnpop() {
 	unsigned int pfn = free_pfn_head->pfn;
 	free_pfn_head = free_pfn_head->next;
 	num_free_pfn --;
-    TracePrintf(1, "PFNPOP - old: %d\t new: %d\t\n", pfn, free_pfn_head->pfn);
+    // TracePrintf(1, "PFNPOP - old: %d\t new: %d\t\n", pfn, free_pfn_head->pfn);
 	return pfn;
 }
 
@@ -79,7 +85,7 @@ pfnpush(unsigned int pfn) {
 	new_pfn_entry->next = free_pfn_head;
 	free_pfn_head = new_pfn_entry;
 	num_free_pfn ++;
-    TracePrintf(1, "PUSHED PFN: %d\t next: %d\n", pfn, free_pfn_head->next->pfn);
+    // TracePrintf(1, "PUSHED PFN: %d\t next: %d\n", pfn, free_pfn_head->next->pfn);
 }
 
 void
@@ -191,10 +197,16 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 	// idle.pid = 0;
 	TracePrintf(1, "--\n");
 	// idle.r0_pointer = r0_page_table;
+	
 
-	// LoadProgram("idle", cmd_args, frame);
+	init = malloc(sizeof (struct pcb*));
+	init -> pid = pid_counter;
+	pid_counter++;
+	running_proc = init;
 
-	//TODO: create actual loop thing. Question: is this literally a sepearte c program???
+	TracePrintf(1, "pcb -> pid: %x\n", init -> pid);
+
+	
 	TracePrintf(1, "cmd_args[0]: %s\n", cmd_args[0]);
 	LoadProgram(cmd_args[0], cmd_args, info);// TODO: CHECK RETURN
 	TracePrintf(1, "End of Kernel Start\n");
@@ -559,6 +571,13 @@ SetKernelBrk(void *addr) {
 	}
 	return (0);
 }
+
+int
+GetPid() {
+	TracePrintf(1, "running_proc -> pid: %x\n", running_proc -> pid);
+	return running_proc -> pid;
+}
+
 
 
 void trap_kernel_handler(ExceptionInfo *info) {
