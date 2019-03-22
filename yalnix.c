@@ -21,7 +21,7 @@ struct pfn_list_entry {
 //I MADE THESE CHANGES 3/20/19 -- Lucy
 struct pcb {
 	unsigned int pid;
-	// struct pte *r0_pointer;
+	struct pte *r0_pointer;
 	//TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
 };
 
@@ -192,16 +192,18 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
 	// I MADE THESE CHANGES 3/20/19 -- Lucy
 	// IDLE PROCESS
-	// idle = (struct pcb*) malloc(sizeof(struct pcb));
+	// idle = malloc(sizeof (struct pcb*));
 	TracePrintf(1, "-\n");
-	// idle.pid = 0;
+	// idle -> pid = pid_counter;
+	// pid_counter++;
 	TracePrintf(1, "--\n");
-	// idle.r0_pointer = r0_page_table;
+	// idle -> r0_pointer = r0_page_table;
 	
 
 	init = malloc(sizeof (struct pcb*));
 	init -> pid = pid_counter;
 	pid_counter++;
+	init -> r0_pointer = r0_page_table;
 	running_proc = init;
 
 	TracePrintf(1, "pcb -> pid: %x\n", init -> pid);
@@ -574,7 +576,7 @@ SetKernelBrk(void *addr) {
 
 int
 GetPid() {
-	TracePrintf(1, "running_proc -> pid: %x\n", running_proc -> pid);
+	TracePrintf(1, "running_proc -> pid: %\n", running_proc -> pid);
 	return running_proc -> pid;
 }
 
