@@ -593,12 +593,6 @@ SetKernelBrk(void *addr) {
 	return (0);
 }
 
-int
-GetPid() {
-	TracePrintf(1, "running_proc -> pid: %\n", running_proc -> pid);
-	return running_proc -> pid;
-}
-
 SavedContext*
 MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "Context Switching\n");
@@ -640,10 +634,90 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     return &pcb2->ctx;
 }
 
+int
+_Fork() {
+	return -1;
+}
 
+int 
+_Exec(char *filename, char **argvec) {
+	return -1;
+}
+
+void 
+_Exit(int status) {
+	
+}
+
+int
+_Wait(int *status_ptr) {
+	return -1;
+}
+
+int
+_GetPid() {
+	TracePrintf(1, "running_proc -> pid: %\n", running_proc -> pid);
+	return running_proc -> pid;
+}
+
+int
+_Brk(void *addr) {
+	return -1;
+}
+
+int
+_Delay(int clock_ticks) {
+	return -1;
+}
+
+int
+_TtyRead(int tty_id, void *buf, int len) {
+	return -1;
+}
+
+int 
+_TtyWrite(int tty_id, void *buf, int len) {
+	return -1;
+}
 
 void trap_kernel_handler(ExceptionInfo *info) {
 	TracePrintf(1, "Exception: Kernel\n");
+	int code_num = info -> code;
+	if (code_num == YALNIX_FORK) {
+		info -> regs[0] = _Fork();
+	}
+
+	if (code_num == YALNIX_EXEC) {
+		info -> regs[0] = _Exec((char*) info -> regs[1],(char**) info -> regs[2]);
+	}
+
+	if (code_num == YALNIX_EXIT) {
+		_Exit((int) info -> regs[1]);
+	}
+
+	if (code_num == YALNIX_WAIT) {
+		info -> regs[0] = _Wait((int*) info -> regs[1]);
+	}
+
+	if (code_num == YALNIX_GETPID) {
+		info -> regs[0] = _GetPid();
+	}
+
+	if (code_num == YALNIX_BRK) {
+		info -> regs[0] = _Brk((void*) info -> regs[1]);
+	}
+	
+	if (code_num == YALNIX_DELAY) {
+		info -> regs[0] = _Delay((int)info -> regs[1]);
+	}
+
+	if (code_num == YALNIX_TTY_READ) {
+		info -> regs[0] = _TtyWrite((int) info -> regs[1], (void*) info -> regs[2], (int) info -> regs[3]);
+	}
+
+	if (code_num == YALNIX_TTY_WRITE) {
+		info -> regs[0] = _TtyWrite((int) info -> regs[1], (void*) info -> regs[2], (int) info -> regs[3]);
+	}
 }
 
 void trap_clock_handler(ExceptionInfo *info) {
