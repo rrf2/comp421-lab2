@@ -10,27 +10,36 @@
 
 
 // struct pfn {
-// 	unsigned int pfn	: 20;	/* page frame number */
+//  unsigned int pfn    : 20;   /* page frame number */
 // };
 
 struct pfn_list_entry {
-	unsigned int pfn	: 20;
-	struct pfn_list_entry *next;
+    unsigned int pfn    : 20;
+    struct pfn_list_entry *next;
 };
 
 //I MADE THESE CHANGES 3/20/19 -- Lucy
 struct pcb {
+    int init;
     char *name;
     char **args;
     ExceptionInfo *info;
-	unsigned int pid;
+    unsigned int pid;
     SavedContext *ctx;
-	struct pte *r0_pointer;
-	//TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
+    struct pte *r0_pointer;
+    unsigned int kstack_pfns[KERNEL_STACK_PAGES];
+
+
+    //TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
+};
+
+struct queue_elem {
+    struct pcb proc;
+    struct queue_elem *next;
 };
 
 // struct page_table {
-// 	struct pte pte_entries[PAGE_TABLE_LEN];
+//  struct pte pte_entries[PAGE_TABLE_LEN];
 // };
 
 int virtual_memory;
@@ -47,6 +56,8 @@ struct pte r1_page_table[PAGE_TABLE_LEN];
 void KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args);
 unsigned int pfnpop();
 void pfnpush(unsigned int pfn);
+struct pcb* qpop();
+void qpush(struct pcb proc);
 int LoadProgram(char *name, char **args, ExceptionInfo *info);
 void trap_kernel_handler(ExceptionInfo *info);
 void trap_clock_handler(ExceptionInfo *info);
@@ -74,89 +85,109 @@ struct pcb *init;
 unsigned int pid_counter = 0;
 struct pcb *running_proc;
 
+struct queue_elem *head;
+struct queue_elem *tail;
+
+int delay_ticks = 0;
+
 unsigned int
 pfnpop() {
-	unsigned int pfn = free_pfn_head->pfn;
-	free_pfn_head = free_pfn_head->next;
-	num_free_pfn --;
+    unsigned int pfn = free_pfn_head->pfn;
+    free_pfn_head = free_pfn_head->next;
+    num_free_pfn --;
     // TracePrintf(1, "PFNPOP - old: %d\t new: %d\t\n", pfn, free_pfn_head->pfn);
-	return pfn;
+    return pfn;
 }
 
 void
 pfnpush(unsigned int pfn) {
-	struct pfn_list_entry *new_pfn_entry = malloc(sizeof (struct pfn_list_entry*));
-	new_pfn_entry->pfn = pfn;
-	new_pfn_entry->next = free_pfn_head;
-	free_pfn_head = new_pfn_entry;
-	num_free_pfn ++;
+    struct pfn_list_entry *new_pfn_entry = malloc(sizeof (struct pfn_list_entry*));
+    new_pfn_entry->pfn = pfn;
+    new_pfn_entry->next = free_pfn_head;
+    free_pfn_head = new_pfn_entry;
+    num_free_pfn ++;
     // TracePrintf(1, "PUSHED PFN: %d\t next: %d\n", pfn, free_pfn_head->next->pfn);
+}
+
+struct pcb*
+qpop() {
+    struct pcb proc = head->proc;
+    head = head->next;
+    return &proc;
+}
+
+void
+qpush(struct pcb proc) {
+    struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
+    new_queue_elem->proc = proc;
+    tail->next = new_queue_elem;
+    tail = new_queue_elem;
 }
 
 void
 KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args) {
 
-	TracePrintf(1, "Tracing\n");
-	// KEEP TRACK OF THE KERNEL BRK and VIRTUAL MEMORY FLAG
-	kernel_brk = orig_brk;
-	virtual_memory = 0;
+    TracePrintf(1, "Tracing\n");
+    // KEEP TRACK OF THE KERNEL BRK and VIRTUAL MEMORY FLAG
+    kernel_brk = orig_brk;
+    virtual_memory = 0;
 
-	// CREATE INrERRUPT VECTOR
-	interrupt_vector[TRAP_KERNEL] = trap_kernel_handler;
-	interrupt_vector[TRAP_CLOCK] = trap_clock_handler;
-	interrupt_vector[TRAP_ILLEGAL] = trap_illegal_handler;
-	interrupt_vector[TRAP_MEMORY] = trap_memory_handler;
-	interrupt_vector[TRAP_MATH] = trap_math_handler;
-	interrupt_vector[TRAP_TTY_RECEIVE] = trap_tty_receive_handler;
-	interrupt_vector[TRAP_TTY_TRANSMIT] = trap_tty_transmit_handler;
+    // CREATE INrERRUPT VECTOR
+    interrupt_vector[TRAP_KERNEL] = trap_kernel_handler;
+    interrupt_vector[TRAP_CLOCK] = trap_clock_handler;
+    interrupt_vector[TRAP_ILLEGAL] = trap_illegal_handler;
+    interrupt_vector[TRAP_MEMORY] = trap_memory_handler;
+    interrupt_vector[TRAP_MATH] = trap_math_handler;
+    interrupt_vector[TRAP_TTY_RECEIVE] = trap_tty_receive_handler;
+    interrupt_vector[TRAP_TTY_TRANSMIT] = trap_tty_transmit_handler;
 
-	// WRITE TO REG_VECTOR_BASE
-	WriteRegister(REG_VECTOR_BASE, (RCS421RegVal) interrupt_vector);
+    // WRITE TO REG_VECTOR_BASE
+    WriteRegister(REG_VECTOR_BASE, (RCS421RegVal) interrupt_vector);
 
 
 
-	// DETERMINE ALREADY USED PAGES
-	used_pages_min = DOWN_TO_PAGE(VMEM_1_BASE) / PAGESIZE;
-	used_pages_max = UP_TO_PAGE(orig_brk) / PAGESIZE;
-	TracePrintf(1, "VMEM_1_BASE: %x\n", VMEM_1_BASE);
-	TracePrintf(1, "orig_brk: %x\n", orig_brk);
-	TracePrintf(1, "KERNEL_STACK_BASE: %x\n", KERNEL_STACK_BASE);
-	TracePrintf(1, "Used pages min: %d\n", used_pages_min);
-	TracePrintf(1, "Used pages max: %d\n", used_pages_max);
-	// USED PAGES -> VEM_BASE_1 down to page, and orig_brk up to page
+    // DETERMINE ALREADY USED PAGES
+    used_pages_min = DOWN_TO_PAGE(VMEM_1_BASE) / PAGESIZE;
+    used_pages_max = UP_TO_PAGE(orig_brk) / PAGESIZE;
+    TracePrintf(1, "VMEM_1_BASE: %x\n", VMEM_1_BASE);
+    TracePrintf(1, "orig_brk: %x\n", orig_brk);
+    TracePrintf(1, "KERNEL_STACK_BASE: %x\n", KERNEL_STACK_BASE);
+    TracePrintf(1, "Used pages min: %d\n", used_pages_min);
+    TracePrintf(1, "Used pages max: %d\n", used_pages_max);
+    // USED PAGES -> VEM_BASE_1 down to page, and orig_brk up to page
 
-	// CREATE THE HEAD OF THE FREE LIST
+    // CREATE THE HEAD OF THE FREE LIST
     free_pfn_head = malloc(sizeof (struct pfn_list_entry*));
-	free_pfn_head->pfn = 0;
-	// free_pfn_head.next = NULL;
+    free_pfn_head->pfn = 0;
+    // free_pfn_head.next = NULL;
 
-	//INITIALIZE Region 1 PAGE TABLE
+    //INITIALIZE Region 1 PAGE TABLE
 
-	TracePrintf(1, "r0_page_table addr: %x\n", r0_page_table);
-	TracePrintf(1, "r1_page_table addr: %x\n", r1_page_table);
+    TracePrintf(1, "r0_page_table addr: %x\n", r0_page_table);
+    TracePrintf(1, "r1_page_table addr: %x\n", r1_page_table);
 
-	// CREATE THE FREE LIST AND INITIALIZE REGION 1 PAGE TABLE
-	for (_i = MEM_INVALID_PAGES; _i < pmem_size / PAGESIZE; _i++) {
-		if (_i < used_pages_min || _i > used_pages_max) {
-			// num_free_pfn ++;
-			// list_entry.pfn = _i;
-			// list_entry.next = &free_pfn_head;
-			// free_pfn_head = list_entry;
+    // CREATE THE FREE LIST AND INITIALIZE REGION 1 PAGE TABLE
+    for (_i = MEM_INVALID_PAGES; _i < pmem_size / PAGESIZE; _i++) {
+        if (_i < used_pages_min || _i > used_pages_max) {
+            // num_free_pfn ++;
+            // list_entry.pfn = _i;
+            // list_entry.next = &free_pfn_head;
+            // free_pfn_head = list_entry;
             pfnpush(_i);
-		} else {
-			// TracePrintf(1, "PTE %d\n", _i);
-			entry.pfn = _i;
-			entry.valid = 1;
-			if (_i < UP_TO_PAGE(&_etext) / PAGESIZE) {
-				prot = PROT_READ|PROT_EXEC;
-			} else {
-				prot = PROT_READ|PROT_WRITE;
-			}
-			entry.uprot = PROT_NONE;
-			entry.kprot = prot;
-			r1_page_table[_i - used_pages_min] = entry;
-		}
-	}
+        } else {
+            // TracePrintf(1, "PTE %d\n", _i);
+            entry.pfn = _i;
+            entry.valid = 1;
+            if (_i < UP_TO_PAGE(&_etext) / PAGESIZE) {
+                prot = PROT_READ|PROT_EXEC;
+            } else {
+                prot = PROT_READ|PROT_WRITE;
+            }
+            entry.uprot = PROT_NONE;
+            entry.kprot = prot;
+            r1_page_table[_i - used_pages_min] = entry;
+        }
+    }
 
     for (_i = used_pages_max; _i < UP_TO_PAGE(kernel_brk) / PAGESIZE; _i++) {
         TracePrintf(1, "Kernel Heap VPN: %d\n", _i);
@@ -168,69 +199,64 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     }
     TracePrintf(1, "kernel_brk: %x\n", kernel_brk);
 
-	// INITIALIZE REGION 0 PAGE TABLE
-	for (_i = 0; _i < used_pages_min; _i ++) {
-		// TracePrintf(1, "%d\n", _i);
-		entry.pfn = _i;
-		if (_i < KERNEL_STACK_BASE / PAGESIZE) {
-			entry.valid = 0;
-			entry.kprot = PROT_READ;
-			entry.uprot = PROT_READ|PROT_WRITE; // NOT SURE WHERE TEXT IS
-		} else {
-			entry.valid = 1;
-			entry.kprot = PROT_READ|PROT_WRITE;
-			entry.uprot = PROT_NONE;
-		}
-		r0_page_table[_i] = entry;
-	}
+    // INITIALIZE REGION 0 PAGE TABLE
+    for (_i = 0; _i < used_pages_min; _i ++) {
+        // TracePrintf(1, "%d\n", _i);
+        entry.pfn = _i;
+        if (_i < KERNEL_STACK_BASE / PAGESIZE) {
+            entry.valid = 0;
+            entry.kprot = PROT_READ;
+            entry.uprot = PROT_READ|PROT_WRITE; // NOT SURE WHERE TEXT IS
+        } else {
+            entry.valid = 1;
+            entry.kprot = PROT_READ|PROT_WRITE;
+            entry.uprot = PROT_NONE;
+        }
+        r0_page_table[_i] = entry;
+    }
 
-	WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
-	WriteRegister(REG_PTR1, (RCS421RegVal) r1_page_table);
-	TracePrintf(1, "About to enable virtual memory\n");
-	WriteRegister(REG_VM_ENABLE, (RCS421RegVal) 1);
-	virtual_memory = 1;
+    WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
+    WriteRegister(REG_PTR1, (RCS421RegVal) r1_page_table);
+    TracePrintf(1, "About to enable virtual memory\n");
+    WriteRegister(REG_VM_ENABLE, (RCS421RegVal) 1);
+    virtual_memory = 1;
     // Add back MEM_INVALID_PAGES
     for (_i=0; _i<MEM_INVALID_PAGES; _i++) {
         pfnpush(_i);
     }
-	TracePrintf(1, "Loading Program\n");
+    TracePrintf(1, "Loading Program\n");
 
 
-	// I MADE THESE CHANGES 3/20/19 -- Lucy
-	// IDLE PROCESS
-	idle = malloc(sizeof (struct pcb*));
-    TracePrintf(1, "size of next malloc: %d\n", PAGE_TABLE_LEN * sizeof(struct pte));
-	idle -> pid = pid_counter;
-	pid_counter++;
-	idle -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    // I MADE THESE CHANGES 3/20/19 -- Lucy
+    // IDLE PROCESS
+    idle = malloc(sizeof (struct pcb));
+    idle -> pid = pid_counter;
+    pid_counter++;
+    idle -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    TracePrintf(1, "Idle r0_pointer: %x\n", idle->r0_pointer);
     idle->ctx = malloc(sizeof(SavedContext));
-    TracePrintf(1, "here2\n");
 
-
-	init = malloc(sizeof (struct pcb));
-    TracePrintf(1, "here3\n");
-	init -> pid = pid_counter;
-	pid_counter++;
-	init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    init = malloc(sizeof (struct pcb));
+    init -> pid = pid_counter;
+    pid_counter++;
+    init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    init -> ctx = malloc(sizeof(SavedContext));
     memcpy(init->r0_pointer, r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
-    TracePrintf(1, "here4\n");
 
-	running_proc = idle;
+    running_proc = idle;
 
-	TracePrintf(1, "pcb -> pid: %x\n", init -> pid);
-
-	TracePrintf(1, "cmd_args[0]: %s\n", cmd_args[0]);
-	LoadProgram(cmd_args[0], cmd_args, info);// TODO: CHECK RETURN
-    TracePrintf(1, "here1.1\n");
 
 
     TracePrintf(1, "&idle->ctx: %x\n", &idle->ctx);
-    LoadProgram("init", cmd_args, info);
-    TracePrintf(1, "kernel stack 508: %d\n", r0_page_table[508].valid);
-    TracePrintf(1, "Loaded program\n");
-    ContextSwitch(MySwitchFunc, idle->ctx, init, init);
-    TracePrintf(1, "Switched contexts\n");
-	TracePrintf(1, "End of Kernel Start\n");
+    TracePrintf(1, "Idle r0_pointer: %x\n", idle->r0_pointer);
+    ContextSwitch(MySwitchFunc, idle->ctx, idle, idle);
+    TracePrintf(1, "Switched idle-idle\n");
+    LoadProgram("idle", cmd_args, info);
+    TracePrintf(1, "Loaded idle\n");
+    ContextSwitch(MySwitchFunc, init->ctx, idle, init);
+    TracePrintf(1,"Switched Context\n");
+    LoadProgram(cmd_args[0], cmd_args, info);
+    TracePrintf(1, "End of Kernel Start\n");
     return;
 }
 
@@ -274,31 +300,31 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     TracePrintf(0, "LoadProgram '%s', args %p\n", name, args);
 
     if ((fd = open(name, O_RDONLY)) < 0) {
-		TracePrintf(0, "LoadProgram: can't open file '%s'\n", name);
-		return (-1);
+        TracePrintf(0, "LoadProgram: can't open file '%s'\n", name);
+        return (-1);
     }
 
     status = LoadInfo(fd, &li);
     TracePrintf(0, "LoadProgram: LoadInfo status %d\n", status);
     switch (status) {
-	case LI_SUCCESS:
-	    break;
-	case LI_FORMAT_ERROR:
-	    TracePrintf(0,
-		"LoadProgram: '%s' not in Yalnix format\n", name);
-	    close(fd);
-	    return (-1);
-	case LI_OTHER_ERROR:
-	    TracePrintf(0, "LoadProgram: '%s' other error\n", name);
-	    close(fd);
-	    return (-1);
-	default:
-	    TracePrintf(0, "LoadProgram: '%s' unknown error\n", name);
-	    close(fd);
-	    return (-1);
+    case LI_SUCCESS:
+        break;
+    case LI_FORMAT_ERROR:
+        TracePrintf(0,
+        "LoadProgram: '%s' not in Yalnix format\n", name);
+        close(fd);
+        return (-1);
+    case LI_OTHER_ERROR:
+        TracePrintf(0, "LoadProgram: '%s' other error\n", name);
+        close(fd);
+        return (-1);
+    default:
+        TracePrintf(0, "LoadProgram: '%s' unknown error\n", name);
+        close(fd);
+        return (-1);
     }
     TracePrintf(0, "text_size 0x%lx, data_size 0x%lx, bss_size 0x%lx\n",
-	li.text_size, li.data_size, li.bss_size);
+    li.text_size, li.data_size, li.bss_size);
     TracePrintf(0, "entry 0x%lx\n", li.entry);
 
     /*
@@ -308,7 +334,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      */
     size = 0;
     for (i = 0; args[i] != NULL; i++) {
-		size += strlen(args[i]) + 1;
+        size += strlen(args[i]) + 1;
     }
     argcount = i;
     TracePrintf(0, "LoadProgram: size %d, argcount %d\n", size, argcount);
@@ -319,8 +345,8 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      */
     cp = argbuf = (char *) malloc(size);
     for (i = 0; args[i] != NULL; i++) {
-		strcpy(cp, args[i]);
-		cp += strlen(cp) + 1;
+        strcpy(cp, args[i]);
+        cp += strlen(cp) + 1;
     }
 
     /*
@@ -335,7 +361,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      *  value must also be aligned down to a multiple of 8 boundary.
      */
     cp = ((char *)USER_STACK_LIMIT) - size;
-    cpp = (char **)((unsigned long)cp & (-1 << 4));	/* align cpp */
+    cpp = (char **)((unsigned long)cp & (-1 << 4)); /* align cpp */
     cpp = (char **)((unsigned long)cpp - ((argcount + 4) * sizeof(void *)));
 
     text_npg = li.text_size >> PAGESHIFT;
@@ -343,18 +369,18 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     stack_npg = (USER_STACK_LIMIT - DOWN_TO_PAGE(cpp)) >> PAGESHIFT;
 
     TracePrintf(0, "LoadProgram: text_npg %d, data_bss_npg %d, stack_npg %d\n",
-	text_npg, data_bss_npg, stack_npg);
+    text_npg, data_bss_npg, stack_npg);
 
     /*
      *  Make sure we will leave at least one page between heap and stack
      */
     if (MEM_INVALID_PAGES + text_npg + data_bss_npg + stack_npg +
-	1 + KERNEL_STACK_PAGES >= PAGE_TABLE_LEN) {
-		TracePrintf(0, "LoadProgram: program '%s' size too large for VM\n",
-		    name);
-		free(argbuf);
-		close(fd);
-		return (-1);
+    1 + KERNEL_STACK_PAGES >= PAGE_TABLE_LEN) {
+        TracePrintf(0, "LoadProgram: program '%s' size too large for VM\n",
+            name);
+        free(argbuf);
+        close(fd);
+        return (-1);
     }
 
     /*
@@ -370,12 +396,12 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>> the new program being loaded.
     // EDITED
     if (text_npg + data_bss_npg + stack_npg > num_free_pfn) {
-		TracePrintf(0,
-		    "LoadProgram: program '%s' size too large for physical memory\n",
-		    name);
-		free(argbuf);
-		close(fd);
-		return (-1);
+        TracePrintf(0,
+            "LoadProgram: program '%s' size too large for physical memory\n",
+            name);
+        free(argbuf);
+        close(fd);
+        return (-1);
     }
 
     // >>>> Initialize sp for the current process to (char *)cpp.
@@ -396,18 +422,18 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>> memory page indicated by that PTE's pfn field.  Set all
     // >>>> of these PTEs to be no longer valid.
     for (i = 0; i < PAGE_TABLE_LEN; i++) {
-    	struct pte entry = r0_page_table[i];
-    	// Check to see if the memory should be freed and free the memory, setting the valid bit to 0
+        struct pte entry = r0_page_table[i];
+        // Check to see if the memory should be freed and free the memory, setting the valid bit to 0
         // TracePrintf(1, "PTE num: %d\n", i);
-    	if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE || entry.pfn * PAGESIZE > KERNEL_STACK_LIMIT)) {
-    		entry.valid = 0;
-    		pfnpush(entry.pfn);
-    		// struct pfn_list_entry new_pfn_entry;
-			// new_pfn_entry.pfn = entry.pfn;
-			// new_pfn_entry.next = &free_pfn_head;
-			// free_pfn_head = new_pfn_entry;
-			// num_free_pfn ++;
-    	}
+        if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE || entry.pfn * PAGESIZE > KERNEL_STACK_LIMIT)) {
+            entry.valid = 0;
+            pfnpush(entry.pfn);
+            // struct pfn_list_entry new_pfn_entry;
+            // new_pfn_entry.pfn = entry.pfn;
+            // new_pfn_entry.next = &free_pfn_head;
+            // free_pfn_head = new_pfn_entry;
+            // num_free_pfn ++;
+        }
     }
 
     /*
@@ -422,8 +448,8 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>> Region 0 page table unused (and thus invalid)
     int vpn = 0;
     for (i=0; i<MEM_INVALID_PAGES;i++) {
-    	r0_page_table[vpn].valid = 0;
-    	vpn ++;
+        r0_page_table[vpn].valid = 0;
+        vpn ++;
     }
 
     /* First, the text pages */
@@ -442,15 +468,15 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // }
 
     for (i=0; i<text_npg; i++) {
-    	r0_page_table[vpn].valid = 1;
-    	r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[vpn].uprot = PROT_READ | PROT_EXEC;
-    	r0_page_table[vpn].pfn = pfnpop();
+        r0_page_table[vpn].valid = 1;
+        r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+        r0_page_table[vpn].uprot = PROT_READ | PROT_EXEC;
+        r0_page_table[vpn].pfn = pfnpop();
         TracePrintf(1, "VPN: %d\t PFN: %d\t addr: %x\n", vpn, r0_page_table[vpn].pfn, r0_page_table[vpn].pfn * PAGESIZE);
-    	vpn ++;
-    	// free_pfn_head.pfn;
-    	// free_pfn_head = free_pfn_head.next;
-    	// num_free_pfn --;
+        vpn ++;
+        // free_pfn_head.pfn;
+        // free_pfn_head = free_pfn_head.next;
+        // num_free_pfn --;
     }
 
 
@@ -462,11 +488,11 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>>     uprot = PROT_READ | PROT_WRITE
     // >>>>     pfn   = a new page of physical memory
     for (i=0; i<data_bss_npg; i++) {
-    	r0_page_table[vpn].valid = 1;
-    	r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[vpn].pfn = pfnpop();
-    	vpn ++;
+        r0_page_table[vpn].valid = 1;
+        r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+        r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
+        r0_page_table[vpn].pfn = pfnpop();
+        vpn ++;
     }
 
     /* And finally the user stack pages */
@@ -481,11 +507,11 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     vpn = DOWN_TO_PAGE(USER_STACK_LIMIT) / PAGESIZE - 1;
     for (i=0; i<stack_npg; i++) {
         TracePrintf(1, "User Stack vpn: %d\t%x  -  %x\n", vpn, vpn*PAGESIZE, (vpn+1)*PAGESIZE);
-    	r0_page_table[vpn].valid = 1;
-    	r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
-    	r0_page_table[vpn].pfn = pfnpop();
-    	vpn --;
+        r0_page_table[vpn].valid = 1;
+        r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+        r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
+        r0_page_table[vpn].pfn = pfnpop();
+        vpn --;
     }
 
     /*
@@ -499,17 +525,17 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      *  Read the text and data from the file into memory.
      */
     if (read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size) != li.text_size+li.data_size) {
-		TracePrintf(0, "LoadProgram: couldn't read for '%s'\n", name);
-		free(argbuf);
-		close(fd);
-		// >>>> Since we are returning -2 here, this should mean to
-		// >>>> the rest of the kernel that the current process should
-		// >>>> be terminated with an exit status of ERROR reported
-		// >>>> to its parent process.
-		//TODO: THIS
-		return (-2);
+        TracePrintf(0, "LoadProgram: couldn't read for '%s'\n", name);
+        free(argbuf);
+        close(fd);
+        // >>>> Since we are returning -2 here, this should mean to
+        // >>>> the rest of the kernel that the current process should
+        // >>>> be terminated with an exit status of ERROR reported
+        // >>>> to its parent process.
+        //TODO: THIS
+        return (-2);
     }
-    close(fd);			/* we've read it all now */
+    close(fd);          /* we've read it all now */
 
     /*
      *  Now set the page table entries for the program text to be readable
@@ -518,7 +544,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>> For text_npg number of PTEs corresponding to the user text
     // >>>> pages, set each PTE's kprot to PROT_READ | PROT_EXEC.
     for (vpn = MEM_INVALID_PAGES; vpn < MEM_INVALID_PAGES + text_npg; vpn++) {
-    	r0_page_table[vpn].kprot = PROT_READ | PROT_EXEC;
+        r0_page_table[vpn].kprot = PROT_READ | PROT_EXEC;
     }
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
@@ -526,7 +552,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      *  Zero out the bss
      */
     memset((void *)(MEM_INVALID_SIZE + li.text_size + li.data_size),
-	'\0', li.bss_size);
+    '\0', li.bss_size);
 
     /*
      *  Set the entry point in the exception frame.
@@ -537,18 +563,18 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     /*
      *  Now, finally, build the argument list on the new stack.
      */
-    *cpp++ = (char *)argcount;		/* the first value at cpp is argc */
+    *cpp++ = (char *)argcount;      /* the first value at cpp is argc */
     cp2 = argbuf;
     for (i = 0; i < argcount; i++) {      /* copy each argument and set argv */
-	*cpp++ = cp;
-	strcpy(cp, cp2);
-	cp += strlen(cp) + 1;
-	cp2 += strlen(cp2) + 1;
+    *cpp++ = cp;
+    strcpy(cp, cp2);
+    cp += strlen(cp) + 1;
+    cp2 += strlen(cp2) + 1;
     }
     free(argbuf);
-    *cpp++ = NULL;	/* the last argv is a NULL pointer */
-    *cpp++ = NULL;	/* a NULL pointer for an empty envp */
-    *cpp++ = 0;		/* and terminate the auxiliary vector */
+    *cpp++ = NULL;  /* the last argv is a NULL pointer */
+    *cpp++ = NULL;  /* a NULL pointer for an empty envp */
+    *cpp++ = 0;     /* and terminate the auxiliary vector */
 
     /*
      *  Initialize all regs[] registers for the current process to 0,
@@ -562,7 +588,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     TracePrintf(1, "Writing to registers\n");
     for(i=0; i<NUM_REGS; i++) {
         // TracePrintf(1, "i: %d", i);
-    	info->regs[i] = 0;
+        info->regs[i] = 0;
     }
     info->psr = 0;
     TracePrintf(1, "Wrote to registers\n");
@@ -571,7 +597,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
 
 int
 SetKernelBrk(void *addr) {
-	if (virtual_memory) {
+    if (virtual_memory) {
         int num_pages_needed = (UP_TO_PAGE(addr) - UP_TO_PAGE(kernel_brk)) / PAGESIZE;
         TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", kernel_brk, addr, num_pages_needed);
         for (_i = num_pages_needed; _i > 0; _i--) {
@@ -589,312 +615,331 @@ SetKernelBrk(void *addr) {
             num_free_pfn --;
         }
     }
-	kernel_brk = addr;
-	return (0);
+    kernel_brk = addr;
+    return (0);
 }
 
 SavedContext*
 MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "Context Switching\n");
-    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
-
-    // CHECK IF PROCESS HAS RUN YET
-
-    if (&pcb1->ctx == NULL) {
-        TracePrintf(1, "Initializing PCB fields\n");
-        pcb1->ctx = malloc(sizeof(SavedContext));
-        pcb1->r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
-    }
 
     // Save current r0 page table to PCB1
     memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
 
     // Store temp kernel stack
-    void* kernel_stackp = malloc(KERNEL_STACK_SIZE);
-    memcpy(kernel_stackp, KERNEL_STACK_BASE, KERNEL_STACK_SIZE);
+    void* kernel_stackp;
+    if (pcb1->init == 0) {
+        kernel_stackp = malloc(KERNEL_STACK_SIZE);
+        memcpy(kernel_stackp, KERNEL_STACK_BASE, KERNEL_STACK_SIZE);
+    }
+
 
     // Copy new page table into current page table
     memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
 
     // Switch register pointer
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
     WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
 
     // Copy temp kernel stack back into memory
-    memcpy(KERNEL_STACK_BASE, kernel_stackp, KERNEL_STACK_SIZE);
+    if (pcb1->init == 0) {
+        pcb1->init = 1;
+        TracePrintf(1, "Copying kernel stack\n");
+        memcpy(KERNEL_STACK_BASE, kernel_stackp, KERNEL_STACK_SIZE);
+    }
 
-    // Copy saved context into PCB1
-    memcpy(&pcb1->ctx, ctxp, sizeof(SavedContext));
-
+    if (head == NULL) {
+        head = pcb1;
+    }
+    tail = pcb1;
 
     // Copy current r0 page table to the page table in the PCB
     running_proc = pcb2;
-    TracePrintf(1, "kernel stack 508: %d\n", r0_page_table[508].valid);
-    return &pcb2->ctx;
+
+    TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
+    return pcb2->ctx;
+}
+
+void
+copyKernelStack(struct pcb *proc) {
+    pte = r0_page_table[]
+    addr;
+    for (_i = 0; _i < 3; _i++) {
+        pfn = pfnpop();
+        proc->kstack_pfns[i] = pfn;
+        memcpy(addr + (i * PAGESIZE), KERNEL_STACK_BASE + (i * PAGESIZE), PAGESIZE);
+    }
 }
 
 int
 _Fork() {
-	return -1;
+    return -1;
 }
 
-int 
+int
 _Exec(char *filename, char **argvec) {
-	return -1;
+    return -1;
 }
 
-void 
+void
 _Exit(int status) {
-	
+
 }
 
 int
 _Wait(int *status_ptr) {
-	return -1;
+    return -1;
 }
 
 int
 _GetPid() {
-	TracePrintf(1, "running_proc -> pid: %\n", running_proc -> pid);
-	return running_proc -> pid;
+    TracePrintf(1, "running_proc -> pid: %\n", running_proc -> pid);
+    return running_proc -> pid;
 }
 
 int
 _Brk(void *addr) {
-	return -1;
+    return -1;
 }
 
 int
 _Delay(int clock_ticks) {
-	return -1;
+    delay_ticks = clock_ticks;
+    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
 }
 
 int
 _TtyRead(int tty_id, void *buf, int len) {
-	return -1;
+    return -1;
 }
 
-int 
+int
 _TtyWrite(int tty_id, void *buf, int len) {
-	return -1;
+    return -1;
 }
 
 void trap_kernel_handler(ExceptionInfo *info) {
-	TracePrintf(1, "Exception: Kernel\n");
-	int code_num = info -> code;
-	if (code_num == YALNIX_FORK) {
-		info -> regs[0] = _Fork();
-	}
+    TracePrintf(1, "Exception: Kernel\n");
+    int code_num = info -> code;
+    if (code_num == YALNIX_FORK) {
+        info -> regs[0] = _Fork();
+    }
 
-	if (code_num == YALNIX_EXEC) {
-		info -> regs[0] = _Exec((char*) info -> regs[1],(char**) info -> regs[2]);
-	}
+    if (code_num == YALNIX_EXEC) {
+        info -> regs[0] = _Exec((char*) info -> regs[1],(char**) info -> regs[2]);
+    }
 
-	if (code_num == YALNIX_EXIT) {
-		_Exit((int) info -> regs[1]);
-	}
+    if (code_num == YALNIX_EXIT) {
+        _Exit((int) info -> regs[1]);
+    }
 
-	if (code_num == YALNIX_WAIT) {
-		info -> regs[0] = _Wait((int*) info -> regs[1]);
-	}
+    if (code_num == YALNIX_WAIT) {
+        info -> regs[0] = _Wait((int*) info -> regs[1]);
+    }
 
-	if (code_num == YALNIX_GETPID) {
-		info -> regs[0] = _GetPid();
-	}
+    if (code_num == YALNIX_GETPID) {
+        info -> regs[0] = _GetPid();
+    }
 
-	if (code_num == YALNIX_BRK) {
-		info -> regs[0] = _Brk((void*) info -> regs[1]);
-	}
-	
-	if (code_num == YALNIX_DELAY) {
-		info -> regs[0] = _Delay((int)info -> regs[1]);
-	}
+    if (code_num == YALNIX_BRK) {
+        info -> regs[0] = _Brk((void*) info -> regs[1]);
+    }
 
-	if (code_num == YALNIX_TTY_READ) {
-		info -> regs[0] = _TtyWrite((int) info -> regs[1], (void*) info -> regs[2], (int) info -> regs[3]);
-	}
+    if (code_num == YALNIX_DELAY) {
+        info -> regs[0] = _Delay((int)info -> regs[1]);
+    }
 
-	if (code_num == YALNIX_TTY_WRITE) {
-		info -> regs[0] = _TtyWrite((int) info -> regs[1], (void*) info -> regs[2], (int) info -> regs[3]);
-	}
+    if (code_num == YALNIX_TTY_READ) {
+        info -> regs[0] = _TtyWrite((int) info -> regs[1], (void*) info -> regs[2], (int) info -> regs[3]);
+    }
+
+    if (code_num == YALNIX_TTY_WRITE) {
+        info -> regs[0] = _TtyWrite((int) info -> regs[1], (void*) info -> regs[2], (int) info -> regs[3]);
+    }
 }
 
 void trap_clock_handler(ExceptionInfo *info) {
-	TracePrintf(1, "Exception: Clock\n");
+    delay_ticks --;
+    if (delay_ticks == 0) {
+        ContextSwitch(MySwitchFunc, idle->ctx, idle, qpop());
+    }
+    TracePrintf(1, "Exception: Clock\n");
 }
 
 void trap_illegal_handler(ExceptionInfo *info) {
-	TracePrintf(1, "Exception: Illegal\n");
-	if (info -> code == TRAP_ILLEGAL_ILLOPC) {
-		printf("%s\n", "Illegal opcode");
-		TracePrintf(1, "Illegal opcode\n");
-		return;
-	}
+    TracePrintf(1, "Exception: Illegal\n");
+    if (info -> code == TRAP_ILLEGAL_ILLOPC) {
+        printf("%s\n", "Illegal opcode");
+        TracePrintf(1, "Illegal opcode\n");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_ILLOPN) {
-		printf("%s\n", "Illegal operand");
-		TracePrintf(1, "Illegal operand\n");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_ILLOPN) {
+        printf("%s\n", "Illegal operand");
+        TracePrintf(1, "Illegal operand\n");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_ILLADR) {
-		printf("%s\n", "Illegal addressing mode");
-		TracePrintf(1, "Illegal addressing mode\n");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_ILLADR) {
+        printf("%s\n", "Illegal addressing mode");
+        TracePrintf(1, "Illegal addressing mode\n");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_ILLTRP) {
-		printf("%s\n", "Illegal software trap");
-		TracePrintf(1, "Illegal software trap\n");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_ILLTRP) {
+        printf("%s\n", "Illegal software trap");
+        TracePrintf(1, "Illegal software trap\n");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_PRVOPC) {
-		printf("%s\n", "Privileged opcode");
-		TracePrintf(1, "Privileged opcode\n");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_PRVOPC) {
+        printf("%s\n", "Privileged opcode");
+        TracePrintf(1, "Privileged opcode\n");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_PRVREG) {
-		printf("%s\n", "Privileged register");
-		TracePrintf(1, "Privileged register\n");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_PRVREG) {
+        printf("%s\n", "Privileged register");
+        TracePrintf(1, "Privileged register\n");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_COPROC) {
-		printf("%s\n", "Coprocessor error");
-		TracePrintf(1, "Coprocessor error\n");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_COPROC) {
+        printf("%s\n", "Coprocessor error");
+        TracePrintf(1, "Coprocessor error\n");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_BADSTK) {
-		printf("%s\n", "Bad stack");
-		TracePrintf(1, "Bad stack\n");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_BADSTK) {
+        printf("%s\n", "Bad stack");
+        TracePrintf(1, "Bad stack\n");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_KERNELI) {
-		printf("%s\n", "Linux kernel sent SIGILL");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_KERNELI) {
+        printf("%s\n", "Linux kernel sent SIGILL");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_USERIB) {
-		printf("%s\n", "Received SIGILL or SIGBUS from user");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_USERIB) {
+        printf("%s\n", "Received SIGILL or SIGBUS from user");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_ADRALN) {
-		printf("%s\n", "Invalid address alignment");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_ADRALN) {
+        printf("%s\n", "Invalid address alignment");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_ADRERR) {
-		printf("%s\n", "Non-existent physical address");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_ADRERR) {
+        printf("%s\n", "Non-existent physical address");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_OBJERR) {
-		printf("%s\n", "Object-specific HW error");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_OBJERR) {
+        printf("%s\n", "Object-specific HW error");
+        return;
+    }
 
-	if (info -> code == TRAP_ILLEGAL_KERNELB) {
-		printf("%s\n", "Linux kernel sent SIGBUS");
-		return;
-	}
+    if (info -> code == TRAP_ILLEGAL_KERNELB) {
+        printf("%s\n", "Linux kernel sent SIGBUS");
+        return;
+    }
 
-	else { return; }
+    else { return; }
 }
 
 void trap_memory_handler(ExceptionInfo *info) {
-	TracePrintf(1, "Exception: Memory\n");
-	if (info -> code == TRAP_MEMORY_MAPERR) {
-		printf("%s%x\n", "No mapping at addr: ", info->addr);
+    TracePrintf(1, "Exception: Memory\n");
+    if (info -> code == TRAP_MEMORY_MAPERR) {
+        printf("%s%x\n", "No mapping at addr: ", info->addr);
         TracePrintf(1, "addr: %x,\tpc: %x\tsp: %x\t\n", info->addr, info->pc, info->sp);
         // TracePrintf(1, "addr: ")
         Halt();
-		return;
-	}
+        return;
+    }
 
-	if (info -> code == TRAP_MEMORY_ACCERR) {
-		printf("%s\n", "Protection violation at addr");
-		return;
-	}
+    if (info -> code == TRAP_MEMORY_ACCERR) {
+        printf("%s\n", "Protection violation at addr");
+        return;
+    }
 
-	if (info -> code == TRAP_MEMORY_KERNEL) {
-		printf("%s\n", "Linux kernel sent SIGSEGV at addr");
-		return;
-	}
+    if (info -> code == TRAP_MEMORY_KERNEL) {
+        printf("Linux kernel sent SIGSEGV at addr: %x\n", info->addr);
+        Halt();
+        return;
+    }
 
-	if (info -> code == TRAP_MEMORY_USER) {
-		printf("%s\n", "Received SIGSEGV from user");
-		return;
-	}
+    if (info -> code == TRAP_MEMORY_USER) {
+        printf("%s\n", "Received SIGSEGV from user");
+        return;
+    }
 
-	else { return; }
+    else { return; }
 }
 
 void trap_math_handler(ExceptionInfo *info) {
-	TracePrintf(1, "Exception: Math\n");
-	if (info -> code == TRAP_MATH_INTDIV) {
-		printf("%s\n", "Integer divide by zero");
-		return;
-	}
+    TracePrintf(1, "Exception: Math\n");
+    if (info -> code == TRAP_MATH_INTDIV) {
+        printf("%s\n", "Integer divide by zero");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_INTOVF) {
-		printf("%s\n", "Integer overflow");
-		return;
-	}
+    if (info -> code == TRAP_MATH_INTOVF) {
+        printf("%s\n", "Integer overflow");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_FLTDIV) {
-		printf("%s\n", "Floating divide by zero");
-		return;
-	}
+    if (info -> code == TRAP_MATH_FLTDIV) {
+        printf("%s\n", "Floating divide by zero");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_FLTOVF) {
-		printf("%s\n", "Floating overflow");
-		return;
-	}
+    if (info -> code == TRAP_MATH_FLTOVF) {
+        printf("%s\n", "Floating overflow");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_FLTUND) {
-		printf("%s\n", "Floating underflow");
-		return;
-	}
+    if (info -> code == TRAP_MATH_FLTUND) {
+        printf("%s\n", "Floating underflow");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_FLTRES) {
-		printf("%s\n", "Floating inexact result");
-		return;
-	}
+    if (info -> code == TRAP_MATH_FLTRES) {
+        printf("%s\n", "Floating inexact result");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_FLTINV) {
-		printf("%s\n", "Invalid floating operation");
-		return;
-	}
+    if (info -> code == TRAP_MATH_FLTINV) {
+        printf("%s\n", "Invalid floating operation");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_FLTSUB) {
-		printf("%s\n", "FP subscript out of range");
-		return;
-	}
+    if (info -> code == TRAP_MATH_FLTSUB) {
+        printf("%s\n", "FP subscript out of range");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_KERNEL) {
-		printf("%s\n", "Linux kernel sent SIGFPE");
-		return;
-	}
+    if (info -> code == TRAP_MATH_KERNEL) {
+        printf("%s\n", "Linux kernel sent SIGFPE");
+        return;
+    }
 
-	if (info -> code == TRAP_MATH_USER) {
-		printf("%s\n", "Received SIGFPE from user");
-		return;
-	}
+    if (info -> code == TRAP_MATH_USER) {
+        printf("%s\n", "Received SIGFPE from user");
+        return;
+    }
 
-	else { return; }
+    else { return; }
 }
 
 void trap_tty_receive_handler(ExceptionInfo *info) {
-	TracePrintf(1, "Exception: TTY Receive\n");
+    TracePrintf(1, "Exception: TTY Receive\n");
 }
 
 void trap_tty_transmit_handler(ExceptionInfo *info) {
-	TracePrintf(1, "Exception: TTY Transmit\n");
+    TracePrintf(1, "Exception: TTY Transmit\n");
 
 }

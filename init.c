@@ -44,19 +44,27 @@ StartTerminal(int i)
 int
 main(int argc, char **argv)
 {
-	printf("INIT\n");
+	printf("INIT pid: %d\n", GetPid());
     int pids[NUM_TERMINALS];
     int i;
     int status;
     int pid;
 
+    printf("Here0\n");
+
     for (i = 0; i < NUM_TERMINALS; i++) {
-	pids[i] = StartTerminal(i);
-	if ((i == TTY_CONSOLE) && (pids[TTY_CONSOLE] < 0)) {
-	    TtyPrintf(TTY_CONSOLE, "Cannot start Console monitor!\n");
-	    Exit(1);
-	}
+    	printf("Here0.1\n");
+		pids[i] = StartTerminal(i);
+		printf("Here0.2\n");
+		if ((i == TTY_CONSOLE) && (pids[TTY_CONSOLE] < 0)) {
+			printf("Here0.3\n");
+		    TtyPrintf(TTY_CONSOLE, "Cannot start Console monitor!\n");
+		    printf("Here0.4\n");
+		    Exit(1);
+		}
     }
+
+    printf("Here1\n");
 
     while (1) {
 	pid = Wait(&status);
@@ -70,9 +78,15 @@ main(int argc, char **argv)
 	     */
 	    Halt();
 	}
+
+	printf("Here2\n");
+
 	for (i = 1; i < NUM_TERMINALS; i++) {
 	    if (pid == pids[i]) break;
 	}
+
+	printf("Here3\n");
+
 	if (i < NUM_TERMINALS) {
 	    TtyPrintf(TTY_CONSOLE, "Pid %d exited on terminal %d.\n", pid, i);
 	    pids[i] = StartTerminal(i);
