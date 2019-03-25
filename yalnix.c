@@ -528,7 +528,9 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
     TracePrintf(1, "HERE2\n");
     TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
-    read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size);
+    TracePrintf(1, "read reg: %x\n", (void *)ReadRegister(REG_PTR0));
+    TracePrintf(1, "r0_page_table addr: %x\n", &r0_page_table);
+    read(fd, (void *)MEM_INVALID_SIZE, 1);//li.text_size+li.data_size - 0x7128);
     TracePrintf(1, "HERE2.0\n");
 
     /*
@@ -655,11 +657,31 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     }
 
     // Copy new page table into current page table
-    // memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+    memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
 
+
+    // Get phys page
+    int vpn = MEM_INVALID_PAGES;
+    while (r0_page_table[vpn].valid) {
+        vpn ++;
+    }
+    WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
+    r0_page_table[vpn].valid = 1;
+    r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+
+    TracePrintf(1, "&r0_page_table: %x\n", &r0_page_table);
+    TracePrintf(1, "DOWN_TO_PAGE(&r0_page_table): %x\n", DOWN_TO_PAGE(&r0_page_table));
+    TracePrintf(1, "&r0_page_table - DOWN_TO_PAGE(&r0_page_table): %x\n", (int)&r0_page_table & PAGEOFFSET);
+    TracePrintf(1, "pfn: %d\n", r0_page_table[DOWN_TO_PAGE(&r0_page_table) / PAGESIZE].pfn);
+    int physaddr = r0_page_table[DOWN_TO_PAGE(&r0_page_table) / PAGESIZE].pfn * PAGESIZE + VMEM_1_BASE;
+    TracePrintf(1, "physaddr: %x\n", physaddr);
+    physaddr += (int)&r0_page_table & PAGEOFFSET;
+    TracePrintf(1, "physaddr: %x\n", physaddr);
+    WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
+
+    WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     // Switch register pointer
     // WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
-    WriteRegister(REG_PTR0, (RCS421RegVal) pcb2->r0_pointer);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
 
@@ -676,7 +698,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     // Copy current r0 page table to the page table in the PCB
     running_proc = pcb2;
-    TracePrintf(1, "pfn for vpn 508: %d\n", running_proc->r0_pointer[508].pfn);
+    TracePrintf(1, "pfn for vpn 508: %d\n", r0_page_table[508].pfn);
     TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
     TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
     return pcb2->ctx;
@@ -686,12 +708,12 @@ void
 copyKernelStack(struct pcb *proc) {
     TracePrintf(1, "Copying Kernel stack\n");
     int vpn = MEM_INVALID_PAGES;
-    while (running_proc->r0_pointer[vpn].valid) {
+    while (r0_page_table[vpn].valid) {
         vpn ++;
     }
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
-    running_proc->r0_pointer[vpn].valid = 1;
-    running_proc->r0_pointer[vpn].kprot = PROT_READ | PROT_WRITE;
+    r0_page_table[vpn].valid = 1;
+    r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
     for (_i = 0; _i < KERNEL_STACK_PAGES; _i++) {
         unsigned int pfn = pfnpop();
         r0_page_table[vpn].pfn = pfn;
@@ -701,7 +723,7 @@ copyKernelStack(struct pcb *proc) {
         WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
     }
     TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
-    running_proc->r0_pointer[vpn].valid = 0;
+    r0_page_table[vpn].valid = 0;
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
 }
 
