@@ -27,14 +27,14 @@ struct pcb {
     unsigned int pid;
     SavedContext *ctx;
     struct pte *r0_pointer;
-    unsigned int kstack_pfns[KERNEL_STACK_PAGES];
+    // unsigned int kstack_pfns[KERNEL_STACK_PAGES];
 
 
     //TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
 };
 
 struct queue_elem {
-    struct pcb proc;
+    struct pcb *proc;
     struct queue_elem *next;
 };
 
@@ -57,7 +57,7 @@ void KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, ch
 unsigned int pfnpop();
 void pfnpush(unsigned int pfn);
 struct pcb* qpop();
-void qpush(struct pcb proc);
+void qpush(struct pcb *proc);
 int LoadProgram(char *name, char **args, ExceptionInfo *info);
 void trap_kernel_handler(ExceptionInfo *info);
 void trap_clock_handler(ExceptionInfo *info);
@@ -67,6 +67,7 @@ void trap_math_handler(ExceptionInfo *info);
 void trap_tty_receive_handler(ExceptionInfo *info);
 void trap_tty_transmit_handler(ExceptionInfo *info);
 int SetKernelBrk(void *addr);
+void copyKernelStack(struct pcb* proc);
 SavedContext *MySwitchFunc(SavedContext *ctxp, void *p1, void *p2);
 
 struct pte entry;
@@ -111,13 +112,13 @@ pfnpush(unsigned int pfn) {
 
 struct pcb*
 qpop() {
-    struct pcb proc = head->proc;
+    struct pcb *proc = head->proc;
     head = head->next;
-    return &proc;
+    return proc;
 }
 
 void
-qpush(struct pcb proc) {
+qpush(struct pcb *proc) {
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
     new_queue_elem->proc = proc;
     tail->next = new_queue_elem;
@@ -235,24 +236,28 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     idle -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
     TracePrintf(1, "Idle r0_pointer: %x\n", idle->r0_pointer);
     idle->ctx = malloc(sizeof(SavedContext));
+    // idle->kstack_pfns = malloc(KERNEL_STACK_PAGES * sizeof(unsigned int));
 
     init = malloc(sizeof (struct pcb));
     init -> pid = pid_counter;
     pid_counter++;
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
     init -> ctx = malloc(sizeof(SavedContext));
+    // init->kstack_pfns = malloc(KERNEL_STACK_PAGES * sizeof(unsigned int));
     memcpy(init->r0_pointer, r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
 
     running_proc = idle;
 
-
+    TracePrintf(1, "MySwitchFunc: %x\n", MySwitchFunc);
 
     TracePrintf(1, "&idle->ctx: %x\n", &idle->ctx);
     TracePrintf(1, "Idle r0_pointer: %x\n", idle->r0_pointer);
+    // copyKernelStack(idle);
     ContextSwitch(MySwitchFunc, idle->ctx, idle, idle);
     TracePrintf(1, "Switched idle-idle\n");
     LoadProgram("idle", cmd_args, info);
     TracePrintf(1, "Loaded idle\n");
+    // copyKernelStack(init);
     ContextSwitch(MySwitchFunc, init->ctx, idle, init);
     TracePrintf(1,"Switched Context\n");
     LoadProgram(cmd_args[0], cmd_args, info);
@@ -513,6 +518,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         r0_page_table[vpn].pfn = pfnpop();
         vpn --;
     }
+    TracePrintf(1, "HERE1\n");
 
     /*
      *  All pages for the new address space are now in place.  Flush
@@ -520,14 +526,22 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      *  we'll be able to do the read() into the new pages below.
      */
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+    TracePrintf(1, "HERE2\n");
+    TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
+    read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size);
+    TracePrintf(1, "HERE2.0\n");
 
     /*
      *  Read the text and data from the file into memory.
      */
     if (read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size) != li.text_size+li.data_size) {
+        TracePrintf(1, "HERE2.1\n");
         TracePrintf(0, "LoadProgram: couldn't read for '%s'\n", name);
+        TracePrintf(1, "HERE2.2\n");
         free(argbuf);
+        TracePrintf(1, "HERE2.3\n");
         close(fd);
+        TracePrintf(1, "HERE2.4\n");
         // >>>> Since we are returning -2 here, this should mean to
         // >>>> the rest of the kernel that the current process should
         // >>>> be terminated with an exit status of ERROR reported
@@ -536,6 +550,8 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         return (-2);
     }
     close(fd);          /* we've read it all now */
+
+    TracePrintf(1, "HERE3\n");
 
     /*
      *  Now set the page table entries for the program text to be readable
@@ -547,6 +563,8 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         r0_page_table[vpn].kprot = PROT_READ | PROT_EXEC;
     }
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+
+    TracePrintf(1, "HERE4\n");
 
     /*
      *  Zero out the bss
@@ -625,30 +643,31 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
 
+
+
     // Save current r0 page table to PCB1
     memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
 
-    // Store temp kernel stack
-    void* kernel_stackp;
-    if (pcb1->init == 0) {
-        kernel_stackp = malloc(KERNEL_STACK_SIZE);
-        memcpy(kernel_stackp, KERNEL_STACK_BASE, KERNEL_STACK_SIZE);
+    if (pcb2->init == 0) {
+        TracePrintf(1, "About to copy kernel stack\n");
+        pcb2->init = 1;
+        copyKernelStack(pcb2);
     }
-
 
     // Copy new page table into current page table
-    memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+    // memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
 
     // Switch register pointer
+    // WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
+    WriteRegister(REG_PTR0, (RCS421RegVal) pcb2->r0_pointer);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-    WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
 
-    // Copy temp kernel stack back into memory
-    if (pcb1->init == 0) {
-        pcb1->init = 1;
-        TracePrintf(1, "Copying kernel stack\n");
-        memcpy(KERNEL_STACK_BASE, kernel_stackp, KERNEL_STACK_SIZE);
-    }
+
+    // for (_i = 0; _i < KERNEL_STACK_PAGES; _i ++) {
+    //     r0_page_table[PAGE_TABLE_LEN - KERNEL_STACK_PAGES + _i].pfn = pcb2->kstack_pfns[_i];
+    // }
+    // WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+
 
     if (head == NULL) {
         head = pcb1;
@@ -657,20 +676,33 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     // Copy current r0 page table to the page table in the PCB
     running_proc = pcb2;
-
+    TracePrintf(1, "pfn for vpn 508: %d\n", r0_page_table[508].pfn);
+    TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
     TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
     return pcb2->ctx;
 }
 
 void
 copyKernelStack(struct pcb *proc) {
-    pte = r0_page_table[]
-    addr;
-    for (_i = 0; _i < 3; _i++) {
-        pfn = pfnpop();
-        proc->kstack_pfns[i] = pfn;
-        memcpy(addr + (i * PAGESIZE), KERNEL_STACK_BASE + (i * PAGESIZE), PAGESIZE);
+    TracePrintf(1, "Copying Kernel stack\n");
+    int vpn = MEM_INVALID_PAGES;
+    while (r0_page_table[vpn].valid) {
+        vpn ++;
     }
+    WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
+    r0_page_table[vpn].valid = 1;
+    r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+    for (_i = 0; _i < KERNEL_STACK_PAGES; _i++) {
+        unsigned int pfn = pfnpop();
+        r0_page_table[vpn].pfn = pfn;
+        proc->r0_pointer[PAGE_TABLE_LEN - KERNEL_STACK_PAGES + _i].pfn = pfn;
+        TracePrintf(1, "Copying to vpn: %d\t addr: %x\t from addr: %x\t w/ pfn:%d\n", vpn, vpn * PAGESIZE, KERNEL_STACK_BASE + (_i * PAGESIZE), pfn);
+        memcpy(vpn * PAGESIZE, KERNEL_STACK_BASE + (_i * PAGESIZE), PAGESIZE);
+        WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
+    }
+    TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
+    r0_page_table[vpn].valid = 0;
+    WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
 }
 
 int
