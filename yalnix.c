@@ -676,7 +676,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     // Copy current r0 page table to the page table in the PCB
     running_proc = pcb2;
-    TracePrintf(1, "pfn for vpn 508: %d\n", r0_page_table[508].pfn);
+    TracePrintf(1, "pfn for vpn 508: %d\n", running_proc->r0_pointer[508].pfn);
     TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
     TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
     return pcb2->ctx;
@@ -686,12 +686,12 @@ void
 copyKernelStack(struct pcb *proc) {
     TracePrintf(1, "Copying Kernel stack\n");
     int vpn = MEM_INVALID_PAGES;
-    while (r0_page_table[vpn].valid) {
+    while (running_proc->r0_pointer[vpn].valid) {
         vpn ++;
     }
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
-    r0_page_table[vpn].valid = 1;
-    r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+    running_proc->r0_pointer[vpn].valid = 1;
+    running_proc->r0_pointer[vpn].kprot = PROT_READ | PROT_WRITE;
     for (_i = 0; _i < KERNEL_STACK_PAGES; _i++) {
         unsigned int pfn = pfnpop();
         r0_page_table[vpn].pfn = pfn;
@@ -701,7 +701,7 @@ copyKernelStack(struct pcb *proc) {
         WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
     }
     TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
-    r0_page_table[vpn].valid = 0;
+    running_proc->r0_pointer[vpn].valid = 0;
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
 }
 
