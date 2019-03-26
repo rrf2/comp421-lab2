@@ -70,6 +70,7 @@ void trap_tty_transmit_handler(ExceptionInfo *info);
 int SetKernelBrk(void *addr);
 void copyKernelStack(struct pcb* proc);
 SavedContext *MySwitchFunc(SavedContext *ctxp, void *p1, void *p2);
+SavedContext *MyCFunc(SavedContext *ctxp, void *p1, void *p2);
 
 struct pte entry;
 int used_pages_min;
@@ -257,9 +258,13 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     TracePrintf(1, "Switched idle-idle\n");
     LoadProgram("idle", cmd_args, info);
     TracePrintf(1, "Loaded idle\n");
+    // ContextSwitch(MyCFunc, init->ctx, init, init);
+    // TracePrintf(1, "cloned init\n");
     ContextSwitch(MySwitchFunc, init->ctx, idle, init);
     TracePrintf(1,"Switched Context idle to init - running_proc pid: %d\n", running_proc->pid);
-    LoadProgram(cmd_args[0], cmd_args, info);
+    if (running_proc->pid == 1) {
+        LoadProgram(cmd_args[0], cmd_args, info);
+    }
     TracePrintf(1, "End of Kernel Start\n");
     return;
 }
@@ -715,6 +720,19 @@ copyKernelStack(struct pcb *proc) {
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
 }
 
+SavedContext*
+MyCFunc(SavedContext *ctxp, void *p1, void *p2) {
+    struct pcb *pcb1 = (struct pcb*)p1;
+    struct pcb *pcb2 = (struct pcb*)p2;
+
+    if (pcb2->init == 0) {
+        pcb2->init = 1;
+        copyKernelStack(pcb2);
+    }
+
+    return &pcb1->ctx;
+}
+
 int
 _Fork() {
     return -1;
@@ -987,5 +1005,4 @@ void trap_tty_receive_handler(ExceptionInfo *info) {
 
 void trap_tty_transmit_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: TTY Transmit\n");
-
 }
