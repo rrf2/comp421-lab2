@@ -93,6 +93,7 @@ struct queue_elem *tail;
 int delay_ticks = 0;
 struct pcb *delay_proc;
 
+
 unsigned int
 pfnpop() {
     unsigned int pfn = free_pfn_head->pfn;
@@ -668,6 +669,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     }
 
     r0_page_table = pcb2->r0_pointer;
+    // TracePrintf(1, "r0_page_table[508].valid: %d\n", r0_page_table[508].valid);
 
     // Copy new page table into current page table
     // memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -707,6 +709,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     // tail = pcb1;
 
     // Copy current r0 page table to the page table in the PCB
+
     running_proc = pcb2;
     // TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
     return pcb2->ctx;
@@ -739,6 +742,37 @@ copyKernelStack(struct pcb *proc) {
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
 }
 
+void
+copyRegion0(struct pcb *proc) {
+    TracePrintf(1, "Copying Region0\n");
+    int vpn = MEM_INVALID_PAGES;
+    while (r0_page_table[vpn].valid) {
+        vpn ++;
+    }
+    TracePrintf(1, "tempvpn: %d\n", vpn);
+    WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
+    int temp_pfn = r0_page_table[vpn].pfn;
+    TracePrintf(1, "temppfn: %d\n", temp_pfn);
+    r0_page_table[vpn].valid = 1;
+    r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+    for (_i = MEM_INVALID_PAGES; _i < PAGE_TABLE_LEN; _i++) {
+        if (r0_page_table[_i].valid && _i != vpn) {
+            unsigned int pfn = pfnpop();
+            r0_page_table[vpn].pfn = pfn;
+            memcpy(&proc->r0_pointer[_i], &r0_page_table[_i], sizeof(struct pte));
+            proc->r0_pointer[_i].pfn = pfn;
+            TracePrintf(1, "Copying vpn:%d\t with vpn:%d\t and addr:%x\t from addr:%x\t to pfn:%d\n", _i, vpn, vpn * PAGESIZE, _i * PAGESIZE, pfn);
+            memcpy(vpn * PAGESIZE, _i * PAGESIZE, PAGESIZE);
+            WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
+        }
+    }
+    // TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
+    r0_page_table[vpn].valid = 0;
+    r0_page_table[vpn].pfn = temp_pfn;
+    // TracePrintf(1, "r0_page_table[508].valid: %d\n", r0_page_table[508].valid);
+    WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
+}
+
 SavedContext*
 MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "Cloning\n");
@@ -747,9 +781,9 @@ MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     pcb2->r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
 
-    memcpy(pcb2->r0_pointer, pcb1->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+    // memcpy(pcb2->r0_pointer, pcb1->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
 
-    copyKernelStack(pcb2);
+    copyRegion0(pcb2);
     TracePrintf(1, "Finished copying kernel stack\n");
 
     pcb2->info = malloc(sizeof (ExceptionInfo));
