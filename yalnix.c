@@ -102,6 +102,7 @@ pfnpop() {
 
 void
 pfnpush(unsigned int pfn) {
+    // TracePrintf(1, "PUSH: %d\n", pfn);
     struct pfn_list_entry *new_pfn_entry = malloc(sizeof (struct pfn_list_entry*));
     new_pfn_entry->pfn = pfn;
     new_pfn_entry->next = free_pfn_head;
@@ -221,6 +222,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     TracePrintf(1, "About to enable virtual memory\n");
     WriteRegister(REG_VM_ENABLE, (RCS421RegVal) 1);
     virtual_memory = 1;
+
     // Add back MEM_INVALID_PAGES
     for (_i=0; _i<MEM_INVALID_PAGES; _i++) {
         pfnpush(_i);
@@ -430,8 +432,10 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         struct pte entry = r0_page_table[i];
         // Check to see if the memory should be freed and free the memory, setting the valid bit to 0
         // TracePrintf(1, "PTE num: %d\n", i);
-        if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE || entry.pfn * PAGESIZE > KERNEL_STACK_LIMIT)) {
+        // if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE)  || (entry.pfn * PAGESIZE) > KERNEL_STACK_LIMIT)) {
+        if (entry.valid && (i * PAGESIZE < KERNEL_STACK_BASE || i * PAGESIZE > KERNEL_STACK_LIMIT)) {
             entry.valid = 0;
+            TracePrintf(1, "PUSHING back pfn: %d\n", entry.pfn);
             pfnpush(entry.pfn);
             // struct pfn_list_entry new_pfn_entry;
             // new_pfn_entry.pfn = entry.pfn;
@@ -526,24 +530,19 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      *  we'll be able to do the read() into the new pages below.
      */
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-    TracePrintf(1, "HERE2\n");
-    TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
-    TracePrintf(1, "read reg: %x\n", (void *)ReadRegister(REG_PTR0));
-    TracePrintf(1, "r0_page_table addr: %x\n", &r0_page_table);
-    read(fd, (void *)MEM_INVALID_SIZE, 1);//li.text_size+li.data_size - 0x7128);
-    TracePrintf(1, "HERE2.0\n");
+    // TracePrintf(1, "HERE2\n");
+    // TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
+    // TracePrintf(1, "read reg: %x\n", (void *)ReadRegister(REG_PTR0));
+    // TracePrintf(1, "r0_page_table addr: %x\n", &r0_page_table);
+    read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size);
 
     /*
      *  Read the text and data from the file into memory.
      */
     if (read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size) != li.text_size+li.data_size) {
-        TracePrintf(1, "HERE2.1\n");
         TracePrintf(0, "LoadProgram: couldn't read for '%s'\n", name);
-        TracePrintf(1, "HERE2.2\n");
         free(argbuf);
-        TracePrintf(1, "HERE2.3\n");
         close(fd);
-        TracePrintf(1, "HERE2.4\n");
         // >>>> Since we are returning -2 here, this should mean to
         // >>>> the rest of the kernel that the current process should
         // >>>> be terminated with an exit status of ERROR reported
@@ -672,8 +671,9 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "&r0_page_table: %x\n", &r0_page_table);
     TracePrintf(1, "DOWN_TO_PAGE(&r0_page_table): %x\n", DOWN_TO_PAGE(&r0_page_table));
     TracePrintf(1, "&r0_page_table - DOWN_TO_PAGE(&r0_page_table): %x\n", (int)&r0_page_table & PAGEOFFSET);
-    TracePrintf(1, "pfn: %d\n", r0_page_table[DOWN_TO_PAGE(&r0_page_table) / PAGESIZE].pfn);
-    int physaddr = r0_page_table[DOWN_TO_PAGE(&r0_page_table) / PAGESIZE].pfn * PAGESIZE + VMEM_1_BASE;
+    TracePrintf(1, "vpn: %d\n", DOWN_TO_PAGE(&r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
+    TracePrintf(1, "pfn: %d\n", r0_page_table[DOWN_TO_PAGE(&r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
+    int physaddr = r0_page_table[DOWN_TO_PAGE(&r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE + VMEM_1_BASE;
     TracePrintf(1, "physaddr: %x\n", physaddr);
     physaddr += (int)&r0_page_table & PAGEOFFSET;
     TracePrintf(1, "physaddr: %x\n", physaddr);
@@ -682,6 +682,9 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     // Switch register pointer
     // WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
+    TracePrintf(1, "About to switch REG_PTR0\n");
+    TracePrintf(1, "pfn for vpn 508: %d\n", r0_page_table[508].pfn);
+    TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
 
@@ -712,6 +715,8 @@ copyKernelStack(struct pcb *proc) {
         vpn ++;
     }
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
+    int temp_pfn = r0_page_table[vpn].pfn;
+    TracePrintf(1, "temppfn: %d\n", temp_pfn);
     r0_page_table[vpn].valid = 1;
     r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
     for (_i = 0; _i < KERNEL_STACK_PAGES; _i++) {
@@ -724,6 +729,7 @@ copyKernelStack(struct pcb *proc) {
     }
     TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
     r0_page_table[vpn].valid = 0;
+    r0_page_table[vpn].pfn = temp_pfn;
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
 }
 
@@ -760,7 +766,10 @@ _Brk(void *addr) {
 
 int
 _Delay(int clock_ticks) {
-    delay_ticks = clock_ticks;
+    // char cmd_args[] = char[1];
+    // cmd_args[0] = "idle";
+    // LoadProgram("idle", cmd_args, info);
+    // delay_ticks = clock_ticks;
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
 }
 
