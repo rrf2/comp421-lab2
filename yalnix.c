@@ -254,15 +254,16 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
     TracePrintf(1, "&idle->ctx: %x\n", &idle->ctx);
     TracePrintf(1, "Idle r0_pointer: %x\n", idle->r0_pointer);
-    // copyKernelStack(idle);
     ContextSwitch(MySwitchFunc, idle->ctx, idle, idle);
     TracePrintf(1, "Switched idle-idle\n");
     LoadProgram("idle", cmd_args, info);
     TracePrintf(1, "Loaded idle\n");
-    // copyKernelStack(init);
     ContextSwitch(MySwitchFunc, init->ctx, idle, init);
     TracePrintf(1,"Switched Context\n");
     LoadProgram(cmd_args[0], cmd_args, info);
+    TracePrintf(1, "r0_page_table[16].valid/pfn: %d/%d\n", r0_page_table[16].valid,r0_page_table[16].pfn);
+    TracePrintf(1, "init r0_page_table[16].valid/pfn: %d/%d\n", init->r0_pointer[16].valid,init->r0_pointer[16].pfn);
+    TracePrintf(1, "r0 loc: %x\n", (void *)ReadRegister(REG_PTR0));
     TracePrintf(1, "End of Kernel Start\n");
     return;
 }
@@ -657,16 +658,10 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     // Copy new page table into current page table
     memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+    TracePrintf(1, "r0_page_table[16].valid/pfn: %d/%d\n", r0_page_table[16].valid,r0_page_table[16].pfn);
+    TracePrintf(1, "pcb2 r0_page_table[16].valid/pfn: %d/%d\n", pcb2->r0_pointer[16].valid,pcb2->r0_pointer[16].pfn);
 
 
-    // Get phys page
-    int vpn = MEM_INVALID_PAGES;
-    while (r0_page_table[vpn].valid) {
-        vpn ++;
-    }
-    WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
-    r0_page_table[vpn].valid = 1;
-    r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
 
     TracePrintf(1, "&r0_page_table: %x\n", &r0_page_table);
     TracePrintf(1, "DOWN_TO_PAGE(&r0_page_table): %x\n", DOWN_TO_PAGE(&r0_page_table));
@@ -677,7 +672,6 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "physaddr: %x\n", physaddr);
     physaddr += (int)&r0_page_table & PAGEOFFSET;
     TracePrintf(1, "physaddr: %x\n", physaddr);
-    WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
 
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     // Switch register pointer
@@ -701,8 +695,8 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     // Copy current r0 page table to the page table in the PCB
     running_proc = pcb2;
-    TracePrintf(1, "pfn for vpn 508: %d\n", r0_page_table[508].pfn);
-    TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
+    TracePrintf(1, "pfn for vpn 16: %d\n", r0_page_table[16].pfn);
+    TracePrintf(1, "pfn for vpn 16: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[16].pfn);
     TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
     return pcb2->ctx;
 }
