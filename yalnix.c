@@ -790,6 +790,7 @@ int
 _Brk(void *addr) {
     TracePrintf(1, "BRK\n");
     if (brk > running_proc->brk) {
+        TracePrintf(1, "Allocating\n");
         int num_pages_needed = (UP_TO_PAGE(addr) - UP_TO_PAGE(running_proc->brk)) / PAGESIZE;
         TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", running_proc->brk, addr, num_pages_needed);
         for (_i = num_pages_needed; _i > 0; _i--) {
@@ -797,7 +798,7 @@ _Brk(void *addr) {
                 return ERROR;
             }
             unsigned int pfn = pfnpop();
-            int vpn = ((unsigned long)running_proc->brk - VMEM_1_BASE) / PAGESIZE;
+            int vpn = ((unsigned long)running_proc->brk) / PAGESIZE;
             TracePrintf(1, "Mallocing VPN: %d\t to PFN: %d\n", vpn, pfn);
             r0_page_table[vpn].valid = 1;
             r0_page_table[vpn].pfn = pfn;
@@ -808,10 +809,11 @@ _Brk(void *addr) {
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
         }
     } else {
+        TracePrintf(1, "Deallocating\n");
         int num_pages_to_free = (UP_TO_PAGE(running_proc->brk) - UP_TO_PAGE(addr)) / PAGESIZE;
         TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages to free: %d\n", running_proc->brk, addr, num_pages_to_free);
         for (_i = num_pages_to_free; _i > 0; _i--) {
-            int vpn = ((unsigned long)running_proc->brk - VMEM_1_BASE) / PAGESIZE;
+            int vpn = ((unsigned long)running_proc->brk) / PAGESIZE;
             unsigned int pfn = r0_page_table[vpn].pfn = pfn;
             TracePrintf(1, "Freeing VPN: %d\t to PFN: %d\n", vpn, pfn);
             pfnpush(pfn);
