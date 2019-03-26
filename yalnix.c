@@ -46,7 +46,8 @@ int virtual_memory;
 void *kernel_brk;
 
 void *interrupt_vector[TRAP_VECTOR_SIZE];
-struct pte r0_page_table[PAGE_TABLE_LEN];
+struct pte initial_r0_page_table[PAGE_TABLE_LEN];
+struct pte *r0_page_table;
 struct pte r1_page_table[PAGE_TABLE_LEN];
 
 
@@ -164,9 +165,12 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     // free_pfn_head.next = NULL;
 
     //INITIALIZE Region 1 PAGE TABLE
-
+    r0_page_table = &initial_r0_page_table;
     TracePrintf(1, "r0_page_table addr: %x\n", r0_page_table);
+    TracePrintf(1, "initial_r0_page_table addr: %x\n", &initial_r0_page_table);
     TracePrintf(1, "r1_page_table addr: %x\n", r1_page_table);
+    TracePrintf(1, "pmemsize: %d\n", pmem_size);
+    TracePrintf(1, "PAGE_TABLE_LEN: %d\n", PAGE_TABLE_LEN);
 
     // CREATE THE FREE LIST AND INITIALIZE REGION 1 PAGE TABLE
     for (_i = MEM_INVALID_PAGES; _i < pmem_size / PAGESIZE; _i++) {
@@ -214,8 +218,11 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
             entry.kprot = PROT_READ|PROT_WRITE;
             entry.uprot = PROT_NONE;
         }
-        r0_page_table[_i] = entry;
+        initial_r0_page_table[_i] = entry;
     }
+
+    // I MADE THESE CHANGES 3/20/19 -- Lucy
+
 
     WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
     WriteRegister(REG_PTR1, (RCS421RegVal) r1_page_table);
@@ -227,15 +234,15 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     for (_i=0; _i<MEM_INVALID_PAGES; _i++) {
         pfnpush(_i);
     }
-    TracePrintf(1, "Loading Program\n");
 
-
-    // I MADE THESE CHANGES 3/20/19 -- Lucy
     // IDLE PROCESS
     idle = malloc(sizeof (struct pcb));
     idle -> pid = pid_counter;
     pid_counter++;
-    idle -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    idle-> r0_pointer = r0_page_table;
+    // memcpy(idle->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
+    // idle -> r0_pointer = initial_r0_page_table;
+
     TracePrintf(1, "Idle r0_pointer: %x\n", idle->r0_pointer);
     idle->ctx = malloc(sizeof(SavedContext));
     // idle->kstack_pfns = malloc(KERNEL_STACK_PAGES * sizeof(unsigned int));
@@ -244,9 +251,10 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     init -> pid = pid_counter;
     pid_counter++;
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
     init -> ctx = malloc(sizeof(SavedContext));
     // init->kstack_pfns = malloc(KERNEL_STACK_PAGES * sizeof(unsigned int));
-    memcpy(init->r0_pointer, r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
+    // memcpy(init->r0_pointer, r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte)); - removed 3/25
 
     running_proc = idle;
 
@@ -258,11 +266,12 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     TracePrintf(1, "Switched idle-idle\n");
     LoadProgram("idle", cmd_args, info);
     TracePrintf(1, "Loaded idle\n");
+    TracePrintf(1, "init r0_page_table[508].valid/pfn: %d/%d\n", init->r0_pointer[508].valid,init->r0_pointer[508].pfn);
+    TracePrintf(1, "init r0_page_table: %x\n", init->r0_pointer);
     ContextSwitch(MySwitchFunc, init->ctx, idle, init);
     TracePrintf(1,"Switched Context\n");
     LoadProgram(cmd_args[0], cmd_args, info);
     TracePrintf(1, "r0_page_table[16].valid/pfn: %d/%d\n", r0_page_table[16].valid,r0_page_table[16].pfn);
-    TracePrintf(1, "init r0_page_table[16].valid/pfn: %d/%d\n", init->r0_pointer[16].valid,init->r0_pointer[16].pfn);
     TracePrintf(1, "r0 loc: %x\n", (void *)ReadRegister(REG_PTR0));
     TracePrintf(1, "End of Kernel Start\n");
     return;
@@ -535,7 +544,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
     // TracePrintf(1, "read reg: %x\n", (void *)ReadRegister(REG_PTR0));
     // TracePrintf(1, "r0_page_table addr: %x\n", &r0_page_table);
-    read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size);
+    // read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size);
 
     /*
      *  Read the text and data from the file into memory.
@@ -648,7 +657,8 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
 
     // Save current r0 page table to PCB1
-    memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
+    // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
+
 
     if (pcb2->init == 0) {
         TracePrintf(1, "About to copy kernel stack\n");
@@ -656,29 +666,33 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
         copyKernelStack(pcb2);
     }
 
+    r0_page_table = pcb2->r0_pointer;
+
     // Copy new page table into current page table
-    memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+    // memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
     TracePrintf(1, "r0_page_table[16].valid/pfn: %d/%d\n", r0_page_table[16].valid,r0_page_table[16].pfn);
     TracePrintf(1, "pcb2 r0_page_table[16].valid/pfn: %d/%d\n", pcb2->r0_pointer[16].valid,pcb2->r0_pointer[16].pfn);
 
 
 
-    TracePrintf(1, "&r0_page_table: %x\n", &r0_page_table);
-    TracePrintf(1, "DOWN_TO_PAGE(&r0_page_table): %x\n", DOWN_TO_PAGE(&r0_page_table));
-    TracePrintf(1, "&r0_page_table - DOWN_TO_PAGE(&r0_page_table): %x\n", (int)&r0_page_table & PAGEOFFSET);
-    TracePrintf(1, "vpn: %d\n", DOWN_TO_PAGE(&r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
-    TracePrintf(1, "pfn: %d\n", r0_page_table[DOWN_TO_PAGE(&r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
-    int physaddr = r0_page_table[DOWN_TO_PAGE(&r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE + VMEM_1_BASE;
+    TracePrintf(1, "r0_page_table: %x\n", r0_page_table);
+    TracePrintf(1, "DOWN_TO_PAGE(&r0_page_table): %x\n", DOWN_TO_PAGE(r0_page_table));
+    TracePrintf(1, "r0_page_table - DOWN_TO_PAGE(&r0_page_table): %x\n", (int)r0_page_table & PAGEOFFSET);
+    TracePrintf(1, "vpn: %d\n", DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
+    TracePrintf(1, "pfn: %d\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
+    int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
     TracePrintf(1, "physaddr: %x\n", physaddr);
-    physaddr += (int)&r0_page_table & PAGEOFFSET;
+    physaddr += (int)r0_page_table & PAGEOFFSET;
     TracePrintf(1, "physaddr: %x\n", physaddr);
+    TracePrintf(1, "pfn: %d\n", DOWN_TO_PAGE(physaddr) / PAGESIZE);
+    TracePrintf(1, "vpn: %d\t r1_page_table[vpn].pfn: %d\n", (DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN), r1_page_table[24].pfn);
 
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     // Switch register pointer
     // WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
     TracePrintf(1, "About to switch REG_PTR0\n");
-    TracePrintf(1, "pfn for vpn 508: %d\n", r0_page_table[508].pfn);
-    TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
+    TracePrintf(1, "pfn: %d\n", ReadRegister(REG_PTR0) / PAGESIZE);
+    // TracePrintf(1, "pfn/valid for vpn 508: %d/%d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn, ((struct pte*)ReadRegister(REG_PTR0))[508].valid);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
 
@@ -696,7 +710,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     // Copy current r0 page table to the page table in the PCB
     running_proc = pcb2;
     TracePrintf(1, "pfn for vpn 16: %d\n", r0_page_table[16].pfn);
-    TracePrintf(1, "pfn for vpn 16: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[16].pfn);
+    // TracePrintf(1, "pfn for vpn 16: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[16].pfn);
     TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
     return pcb2->ctx;
 }
@@ -708,6 +722,7 @@ copyKernelStack(struct pcb *proc) {
     while (r0_page_table[vpn].valid) {
         vpn ++;
     }
+    TracePrintf(1, "tempvpn: %d\n", vpn);
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) vpn);
     int temp_pfn = r0_page_table[vpn].pfn;
     TracePrintf(1, "temppfn: %d\n", temp_pfn);
