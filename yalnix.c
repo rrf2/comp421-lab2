@@ -27,6 +27,7 @@ struct pcb {
     unsigned int pid;
     SavedContext *ctx;
     struct pte *r0_pointer;
+    void *brk;
     // unsigned int kstack_pfns[KERNEL_STACK_PAGES];
 
 
@@ -771,7 +772,7 @@ _Exec(char *filename, char **argvec) {
 
 void
 _Exit(int status) {
-
+    TracePrintf(1, "EXIT\n");
 }
 
 int
@@ -787,7 +788,40 @@ _GetPid() {
 
 int
 _Brk(void *addr) {
-    return -1;
+    TracePrintf(1, "BRK\n");
+    if (brk > running_proc->brk) {
+        int num_pages_needed = (UP_TO_PAGE(addr) - UP_TO_PAGE(running_proc->brk)) / PAGESIZE;
+        TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", running_proc->brk, addr, num_pages_needed);
+        for (_i = num_pages_needed; _i > 0; _i--) {
+            if (num_free_pfn <= 0) {
+                return ERROR;
+            }
+            unsigned int pfn = pfnpop();
+            int vpn = ((unsigned long)running_proc->brk - VMEM_1_BASE) / PAGESIZE;
+            TracePrintf(1, "Mallocing VPN: %d\t to PFN: %d\n", vpn, pfn);
+            r0_page_table[vpn].valid = 1;
+            r0_page_table[vpn].pfn = pfn;
+            r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
+            r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+            running_proc->brk = VMEM_1_BASE + ((vpn + 1) * PAGESIZE);
+            num_free_pfn --;
+            WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+        }
+    } else {
+        int num_pages_to_free = (UP_TO_PAGE(running_proc->brk) - UP_TO_PAGE(addr)) / PAGESIZE;
+        TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages to free: %d\n", running_proc->brk, addr, num_pages_to_free);
+        for (_i = num_pages_to_free; _i > 0; _i--) {
+            int vpn = ((unsigned long)running_proc->brk - VMEM_1_BASE) / PAGESIZE;
+            unsigned int pfn = r0_page_table[vpn].pfn = pfn;
+            TracePrintf(1, "Freeing VPN: %d\t to PFN: %d\n", vpn, pfn);
+            pfnpush(pfn);
+            r0_page_table[vpn].valid = 0;
+            running_proc->brk = VMEM_1_BASE + ((vpn + 1) * PAGESIZE);
+            num_free_pfn ++;
+            WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+        }
+    }
+    return 0;
 }
 
 int
