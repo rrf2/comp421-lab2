@@ -117,6 +117,7 @@ struct pcb*
 qpop() {
     struct pcb *proc = head->proc;
     head = head->next;
+    TracePrintf(1, "QPOP - return %x\t new head: %x\n", pcbm head->pcb);
     return proc;
 }
 
@@ -126,6 +127,7 @@ qpush(struct pcb *proc) {
     new_queue_elem->proc = proc;
     tail->next = new_queue_elem;
     tail = new_queue_elem;
+    TracePrintf(1, "QPUSH pushed %x\t next: %x\n", proc, head->next);
 }
 
 void
@@ -634,19 +636,25 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "Context Switching\n");
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
+    TracePrintf(1, "HERE1\n");
 
 
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
 
-
+    TracePrintf(1, "HERE2\n");
+    TracePrintf(1, "pcb2: %x\n", pcb2);
+    TracePrintf(1, "pcb2->init: %d\n", pcb2->init);
     if (pcb2->init == 0) {
         pcb2->init = 1;
+        TracePrintf(1, "HERE1.2\n");
         copyKernelStack(pcb2);
     }
+    TracePrintf(1, "HERE3\n");
 
     r0_page_table = pcb2->r0_pointer;
+    TracePrintf(1, "HERE4\n");
 
     // Copy new page table into current page table
     // memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -666,7 +674,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     // TracePrintf(1, "physaddr: %x\n", physaddr);
     // TracePrintf(1, "pfn: %d\n", DOWN_TO_PAGE(physaddr) / PAGESIZE);
     // TracePrintf(1, "vpn: %d\t r1_page_table[vpn].pfn: %d\n", (DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN), r1_page_table[24].pfn);
-
+    TracePrintf(1, "HERE5\n");
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     // Switch register pointer
     // WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
@@ -681,7 +689,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     // }
     // WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
-
+    TracePrintf(1, "HERE6\n");
     if (head == NULL) {
         head = pcb1;
     }
@@ -771,6 +779,9 @@ _Delay(int clock_ticks) {
     // LoadProgram("idle", cmd_args, info);
     TracePrintf(1, "DELAY\n");
     delay_ticks = clock_ticks;
+    TracePrintf(1, "idle addr: %x\n", idle);
+    TracePrintf(1, "running_proc addr: %x\n", running_proc);
+    qpush(running_proc);
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
 }
 
@@ -827,7 +838,11 @@ void trap_kernel_handler(ExceptionInfo *info) {
 void trap_clock_handler(ExceptionInfo *info) {
     delay_ticks --;
     if (delay_ticks == 0) {
-        ContextSwitch(MySwitchFunc, idle->ctx, idle, qpop());
+        TracePrintf(1, "End of delaying, switching back\n");
+        struct pcb *next_proc = qpop();
+        TracePrintf(1, "Next Proc addr: %x\n", next_proc);
+        TracePrintf(1, "Next Proc pid: %d\n", next_proc->pid);
+        ContextSwitch(MySwitchFunc, idle->ctx, idle, next_proc);
     }
     TracePrintf(1, "Exception: Clock\n");
 }
