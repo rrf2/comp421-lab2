@@ -130,7 +130,6 @@ qpush(struct pcb *proc) {
 void
 KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args) {
 
-    TracePrintf(1, "Tracing\n");
     // KEEP TRACK OF THE KERNEL BRK and VIRTUAL MEMORY FLAG
     kernel_brk = orig_brk;
     virtual_memory = 0;
@@ -152,11 +151,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     // DETERMINE ALREADY USED PAGES
     used_pages_min = DOWN_TO_PAGE(VMEM_1_BASE) / PAGESIZE;
     used_pages_max = UP_TO_PAGE(orig_brk) / PAGESIZE;
-    TracePrintf(1, "VMEM_1_BASE: %x\n", VMEM_1_BASE);
-    TracePrintf(1, "orig_brk: %x\n", orig_brk);
-    TracePrintf(1, "KERNEL_STACK_BASE: %x\n", KERNEL_STACK_BASE);
-    TracePrintf(1, "Used pages min: %d\n", used_pages_min);
-    TracePrintf(1, "Used pages max: %d\n", used_pages_max);
     // USED PAGES -> VEM_BASE_1 down to page, and orig_brk up to page
 
     // CREATE THE HEAD OF THE FREE LIST
@@ -203,7 +197,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
         entry.kprot = PROT_READ|PROT_WRITE;
         r1_page_table[_i - used_pages_min] = entry;
     }
-    TracePrintf(1, "kernel_brk: %x\n", kernel_brk);
 
     // INITIALIZE REGION 0 PAGE TABLE
     for (_i = 0; _i < used_pages_min; _i ++) {
@@ -226,7 +219,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
     WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
     WriteRegister(REG_PTR1, (RCS421RegVal) r1_page_table);
-    TracePrintf(1, "About to enable virtual memory\n");
+    TracePrintf(1, "Enabling Virtual Memory\n");
     WriteRegister(REG_VM_ENABLE, (RCS421RegVal) 1);
     virtual_memory = 1;
 
@@ -249,6 +242,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
     init = malloc(sizeof (struct pcb));
     init -> pid = pid_counter;
+    init -> init = 0;
     pid_counter++;
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
     memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -258,21 +252,14 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
     running_proc = idle;
 
-    TracePrintf(1, "MySwitchFunc: %x\n", MySwitchFunc);
 
-    TracePrintf(1, "&idle->ctx: %x\n", &idle->ctx);
-    TracePrintf(1, "Idle r0_pointer: %x\n", idle->r0_pointer);
     ContextSwitch(MySwitchFunc, idle->ctx, idle, idle);
     TracePrintf(1, "Switched idle-idle\n");
     LoadProgram("idle", cmd_args, info);
     TracePrintf(1, "Loaded idle\n");
-    TracePrintf(1, "init r0_page_table[508].valid/pfn: %d/%d\n", init->r0_pointer[508].valid,init->r0_pointer[508].pfn);
-    TracePrintf(1, "init r0_page_table: %x\n", init->r0_pointer);
     ContextSwitch(MySwitchFunc, init->ctx, idle, init);
-    TracePrintf(1,"Switched Context\n");
+    TracePrintf(1,"Switched Context idle to init - running_proc pid: %d\n", running_proc->pid);
     LoadProgram(cmd_args[0], cmd_args, info);
-    TracePrintf(1, "r0_page_table[16].valid/pfn: %d/%d\n", r0_page_table[16].valid,r0_page_table[16].pfn);
-    TracePrintf(1, "r0 loc: %x\n", (void *)ReadRegister(REG_PTR0));
     TracePrintf(1, "End of Kernel Start\n");
     return;
 }
@@ -423,7 +410,6 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
 
     // >>>> Initialize sp for the current process to (char *)cpp.
     // >>>> The value of cpp was initialized above.
-    TracePrintf(1, "Info addr: %x\n", &info);
     info->sp = (char *)cpp; // I Just copied what's in the above comment
 
 
@@ -485,7 +471,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     //     TracePrintf(1, "-- %d", curr->pfn);
     //     curr = curr->next;
     // }
-
+    TracePrintf(1, "Allocating text PTEs\n");
     for (i=0; i<text_npg; i++) {
         r0_page_table[vpn].valid = 1;
         r0_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
@@ -532,7 +518,6 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         r0_page_table[vpn].pfn = pfnpop();
         vpn --;
     }
-    TracePrintf(1, "HERE1\n");
 
     /*
      *  All pages for the new address space are now in place.  Flush
@@ -540,11 +525,6 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      *  we'll be able to do the read() into the new pages below.
      */
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-    // TracePrintf(1, "HERE2\n");
-    // TracePrintf(1, "pfn for vpn 508: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn);
-    // TracePrintf(1, "read reg: %x\n", (void *)ReadRegister(REG_PTR0));
-    // TracePrintf(1, "r0_page_table addr: %x\n", &r0_page_table);
-    // read(fd, (void *)MEM_INVALID_SIZE, li.text_size+li.data_size);
 
     /*
      *  Read the text and data from the file into memory.
@@ -562,7 +542,6 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     }
     close(fd);          /* we've read it all now */
 
-    TracePrintf(1, "HERE3\n");
 
     /*
      *  Now set the page table entries for the program text to be readable
@@ -574,8 +553,6 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         r0_page_table[vpn].kprot = PROT_READ | PROT_EXEC;
     }
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-
-    TracePrintf(1, "HERE4\n");
 
     /*
      *  Zero out the bss
@@ -614,13 +591,12 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>> Initialize regs[0] through regs[NUM_REGS-1] for the
     // >>>> current process to 0.
     // >>>> Initialize psr for the current process to 0.
-    TracePrintf(1, "Writing to registers\n");
     for(i=0; i<NUM_REGS; i++) {
         // TracePrintf(1, "i: %d", i);
         info->regs[i] = 0;
     }
     info->psr = 0;
-    TracePrintf(1, "Wrote to registers\n");
+    TracePrintf(1, "Finished loading program\n");
     return (0);
 }
 
@@ -661,7 +637,6 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
 
     if (pcb2->init == 0) {
-        TracePrintf(1, "About to copy kernel stack\n");
         pcb2->init = 1;
         copyKernelStack(pcb2);
     }
@@ -670,28 +645,28 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     // Copy new page table into current page table
     // memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
-    TracePrintf(1, "r0_page_table[16].valid/pfn: %d/%d\n", r0_page_table[16].valid,r0_page_table[16].pfn);
-    TracePrintf(1, "pcb2 r0_page_table[16].valid/pfn: %d/%d\n", pcb2->r0_pointer[16].valid,pcb2->r0_pointer[16].pfn);
+    // TracePrintf(1, "r0_page_table[16].valid/pfn: %d/%d\n", r0_page_table[16].valid,r0_page_table[16].pfn);
+    // TracePrintf(1, "pcb2 r0_page_table[16].valid/pfn: %d/%d\n", pcb2->r0_pointer[16].valid,pcb2->r0_pointer[16].pfn);
 
 
 
-    TracePrintf(1, "r0_page_table: %x\n", r0_page_table);
-    TracePrintf(1, "DOWN_TO_PAGE(&r0_page_table): %x\n", DOWN_TO_PAGE(r0_page_table));
-    TracePrintf(1, "r0_page_table - DOWN_TO_PAGE(&r0_page_table): %x\n", (int)r0_page_table & PAGEOFFSET);
-    TracePrintf(1, "vpn: %d\n", DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
-    TracePrintf(1, "pfn: %d\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
+    // TracePrintf(1, "r0_page_table: %x\n", r0_page_table);
+    // TracePrintf(1, "DOWN_TO_PAGE(&r0_page_table): %x\n", DOWN_TO_PAGE(r0_page_table));
+    // TracePrintf(1, "r0_page_table - DOWN_TO_PAGE(&r0_page_table): %x\n", (int)r0_page_table & PAGEOFFSET);
+    // TracePrintf(1, "vpn: %d\n", DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
+    // TracePrintf(1, "pfn: %d\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
-    TracePrintf(1, "physaddr: %x\n", physaddr);
+    // TracePrintf(1, "physaddr: %x\n", physaddr);
     physaddr += (int)r0_page_table & PAGEOFFSET;
-    TracePrintf(1, "physaddr: %x\n", physaddr);
-    TracePrintf(1, "pfn: %d\n", DOWN_TO_PAGE(physaddr) / PAGESIZE);
-    TracePrintf(1, "vpn: %d\t r1_page_table[vpn].pfn: %d\n", (DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN), r1_page_table[24].pfn);
+    // TracePrintf(1, "physaddr: %x\n", physaddr);
+    // TracePrintf(1, "pfn: %d\n", DOWN_TO_PAGE(physaddr) / PAGESIZE);
+    // TracePrintf(1, "vpn: %d\t r1_page_table[vpn].pfn: %d\n", (DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN), r1_page_table[24].pfn);
 
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     // Switch register pointer
     // WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
-    TracePrintf(1, "About to switch REG_PTR0\n");
-    TracePrintf(1, "pfn: %d\n", ReadRegister(REG_PTR0) / PAGESIZE);
+    // TracePrintf(1, "About to switch REG_PTR0\n");
+    // TracePrintf(1, "pfn: %d\n", ReadRegister(REG_PTR0) / PAGESIZE);
     // TracePrintf(1, "pfn/valid for vpn 508: %d/%d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn, ((struct pte*)ReadRegister(REG_PTR0))[508].valid);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
@@ -709,9 +684,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     // Copy current r0 page table to the page table in the PCB
     running_proc = pcb2;
-    TracePrintf(1, "pfn for vpn 16: %d\n", r0_page_table[16].pfn);
-    // TracePrintf(1, "pfn for vpn 16: %d\n", ((struct pte*)ReadRegister(REG_PTR0))[16].pfn);
-    TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
+    // TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
     return pcb2->ctx;
 }
 
@@ -736,7 +709,7 @@ copyKernelStack(struct pcb *proc) {
         memcpy(vpn * PAGESIZE, KERNEL_STACK_BASE + (_i * PAGESIZE), PAGESIZE);
         WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
     }
-    TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
+    // TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
     r0_page_table[vpn].valid = 0;
     r0_page_table[vpn].pfn = temp_pfn;
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
@@ -778,7 +751,8 @@ _Delay(int clock_ticks) {
     // char cmd_args[] = char[1];
     // cmd_args[0] = "idle";
     // LoadProgram("idle", cmd_args, info);
-    // delay_ticks = clock_ticks;
+    TracePrintf(1, "DELAY\n");
+    delay_ticks = clock_ticks;
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
 }
 
