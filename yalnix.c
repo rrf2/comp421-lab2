@@ -21,8 +21,6 @@ struct pfn_list_entry {
 //I MADE THESE CHANGES 3/20/19 -- Lucy
 struct pcb {
     int init;
-    char *name;
-    char **args;
     ExceptionInfo *info;
     unsigned int pid;
     SavedContext *ctx;
@@ -253,18 +251,18 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     // IDLE PROCESS
     idle = malloc(sizeof (struct pcb));
     idle -> pid = pid_counter;
+    idle -> info = malloc(sizeof(ExceptionInfo));
+    memcpy(idle->info, info, sizeof(ExceptionInfo));
     pid_counter++;
     idle-> r0_pointer = r0_page_table;
-    // memcpy(idle->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
-    // idle -> r0_pointer = initial_r0_page_table;
-
-    TracePrintf(1, "Idle r0_pointer: %x\n", idle->r0_pointer);
     idle->ctx = malloc(sizeof(SavedContext));
-    // idle->kstack_pfns = malloc(KERNEL_STACK_PAGES * sizeof(unsigned int));
+
 
     init = malloc(sizeof (struct pcb));
     init -> pid = pid_counter;
     init -> init = 0;
+    init -> info = malloc(sizeof(ExceptionInfo));
+    memcpy(init->info, info, sizeof(ExceptionInfo));
     pid_counter++;
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
     memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -656,25 +654,20 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "Context Switching\n");
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
-    TracePrintf(1, "HERE1\n");
 
 
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
 
-    TracePrintf(1, "HERE2\n");
     TracePrintf(1, "pcb2: %x\n", pcb2);
     TracePrintf(1, "pcb2->init: %d\n", pcb2->init);
     if (pcb2->init == 0) {
         pcb2->init = 1;
-        TracePrintf(1, "HERE1.2\n");
         copyKernelStack(pcb2);
     }
-    TracePrintf(1, "HERE3\n");
 
     r0_page_table = pcb2->r0_pointer;
-    TracePrintf(1, "HERE4\n");
 
     // Copy new page table into current page table
     // memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -694,7 +687,6 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     // TracePrintf(1, "physaddr: %x\n", physaddr);
     // TracePrintf(1, "pfn: %d\n", DOWN_TO_PAGE(physaddr) / PAGESIZE);
     // TracePrintf(1, "vpn: %d\t r1_page_table[vpn].pfn: %d\n", (DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN), r1_page_table[24].pfn);
-    TracePrintf(1, "HERE5\n");
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     // Switch register pointer
     // WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
@@ -709,7 +701,6 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     // }
     // WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
-    TracePrintf(1, "HERE6\n");
     // if (head == NULL) {
     //     qpush(pcb1);
     // }
@@ -749,21 +740,46 @@ copyKernelStack(struct pcb *proc) {
 }
 
 SavedContext*
-MyCFunc(SavedContext *ctxp, void *p1, void *p2) {
+MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
+    TracePrintf(1, "Cloning\n");
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
 
-    if (pcb2->init == 0) {
-        pcb2->init = 1;
-        copyKernelStack(pcb2);
-    }
+    pcb2->r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
 
-    return &pcb1->ctx;
+    memcpy(pcb2->r0_pointer, pcb1->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+
+    copyKernelStack(pcb2);
+    TracePrintf(1, "Finished copying kernel stack\n");
+
+    pcb2->info = malloc(sizeof (ExceptionInfo));
+    TracePrintf(1, "Malloced info\n");
+    memcpy(pcb2->info, pcb1->info, sizeof(ExceptionInfo));
+
+    TracePrintf(1, "Returning from MyCloneFunc\n");
+
+    return &pcb2->ctx;
 }
 
 int
 _Fork() {
-    return -1;
+    TracePrintf(1, "Forking\n");
+    struct pcb *child_proc = malloc(sizeof (struct pcb*));
+    child_proc->ctx = malloc(sizeof (SavedContext));
+    int new_pid = pid_counter;
+    pid_counter ++;
+    child_proc->pid = new_pid;
+    // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
+    ContextSwitch(MyCloneFunc, &child_proc->ctx, running_proc, child_proc);
+    TracePrintf(1, "between switches\n");
+    ContextSwitch(MySwitchFunc, &running_proc->ctx, running_proc, child_proc);
+    if (running_proc->pid == new_pid){
+        TracePrintf(1, "FORK RETURN CHILD\n");
+        return 0;
+    } else {
+        TracePrintf(1, "FORK RETURN PARENT\n");
+        return new_pid;
+    }
 }
 
 int
@@ -802,7 +818,7 @@ _Brk(void *addr) {
             }
             unsigned int pfn = pfnpop();
             int vpn = ((unsigned long)running_proc->brk) / PAGESIZE;
-            TracePrintf(1, "Mallocing VPN: %d\t to PFN: %d\n", vpn, pfn);
+            // TracePrintf(1, "Mallocing VPN: %d\t to PFN: %d\n", vpn, pfn);
             r0_page_table[vpn].valid = 1;
             r0_page_table[vpn].pfn = pfn;
             r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
@@ -818,7 +834,7 @@ _Brk(void *addr) {
         for (_i = num_pages; _i > 0; _i--) {
             int vpn = ((unsigned long)UP_TO_PAGE(running_proc->brk)) / PAGESIZE - 1;
             unsigned int pfn = r0_page_table[vpn].pfn;
-            TracePrintf(1, "Freeing VPN: %d\t with PFN: %d\n", vpn, pfn);
+            // TracePrintf(1, "Freeing VPN: %d\t with PFN: %d\n", vpn, pfn);
             pfnpush(pfn);
             r0_page_table[vpn].valid = 0;
             running_proc->brk = vpn * PAGESIZE;
