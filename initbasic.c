@@ -13,5 +13,6 @@ main(int argc, char **argv)
     Brk((void *) (VMEM_0_BASE + PAGE_TABLE_LEN * PAGESIZE / 2));
     printf("BrK(%x)\n", VMEM_0_BASE + PAGE_TABLE_LEN * PAGESIZE / 4);
     Brk((void *) (VMEM_0_BASE + PAGE_TABLE_LEN * PAGESIZE / 4));
-    return 0;
+    printf("Done with initbasic\n");
+    Exit(0);
 }

@@ -136,13 +136,22 @@ qpop() {
     TracePrintf(1, "QPOP\n");
     struct pcb *proc = head->proc;
     TracePrintf(1, "here1\n");
-    
+
     TracePrintf(1, "here2\n");
     int head_proc_pid = -1;
     if (proc != NULL) {
+        TracePrintf(1, "head addr: %x\n", head);
+        TracePrintf(1, "dummy addr: %x\n", &dummy);
     	head = head->next;
+        TracePrintf(1, "head addr: %x\n", head);
+        if (dummy.proc == NULL) {
+            TracePrintf(1, "dummy proc is null\n");
+        }
         TracePrintf(1, "here3\n");
-        head_proc_pid = head->proc->pid;
+        if (head->proc != NULL) {
+            TracePrintf(1, "here3.1\n");
+            head_proc_pid = head->proc->pid;
+        }
     }
     TracePrintf(1, "here4\n");
     if (proc == NULL) {
@@ -150,7 +159,7 @@ qpop() {
     	tail = &dummy;
     	return idle;
     }
-    
+
     TracePrintf(1, "QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
     return proc;
 }
@@ -161,7 +170,7 @@ qpush(struct pcb *proc) {
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
     new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
-    
+
     new_queue_elem -> proc = proc;
     TracePrintf(1, "HERE7\n");
     TracePrintf(1, "THIS IS CURRENT NEW QUEUE ELEMENT: %d\n", new_queue_elem -> proc -> pid);
@@ -172,27 +181,27 @@ qpush(struct pcb *proc) {
     if (head -> proc == NULL) {
     	TracePrintf(1, "HERE7.1\n");
     	head = new_queue_elem;
+        head->next = tail;
     	TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
-    }
-    else {
+    } else {
     	tail -> next = new_queue_elem;
     }
     TracePrintf(1, "HERE7.1\n");
 
     // TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
     tail = new_queue_elem;
-    tail->next = NULL;
+    tail->next = &dummy;
     // tail = new_queue_elem;
-    
+
     int next_proc_pid = -1;
 
 	TracePrintf(1, "HERE8\n");
     // TracePrintf(1, "head -> next: %d\n", head -> next);
-    if (head->next != NULL) {
-    	TracePrintf(1, "HERE9\n");
-        next_proc_pid = head->next->proc->pid;
-    }
-    TracePrintf(1, "QPUSH pushed pid %d\t next pid: %d\n", head -> proc -> pid, next_proc_pid);
+    // if (head->next != NULL) {
+    // 	TracePrintf(1, "HERE9\n");
+    //     next_proc_pid = head->next->proc->pid;
+    // }
+    // TracePrintf(1, "QPUSH pushed pid %d\t next pid: %d\n", head -> proc -> pid, next_proc_pid);
     // TracePrintf(1, "head: %d, %d\n", head -> proc -> pid, head -> next);
 }
 
@@ -759,10 +768,10 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     //     qpush(pcb1);
     // }
     // tail = pcb1;
-   
+
     if (pcb1 -> pid != 0) {
     	TracePrintf(1, "HERE6.1\n");
-    	qpush(pcb1);
+    	// qpush(pcb1);
 
     	TracePrintf(1, "HERE6.3\n");
     }
@@ -879,12 +888,17 @@ _Fork() {
 
 int
 _Exec(char *filename, char **argvec) {
-    return -1;
+
 }
 
 void
 _Exit(int status) {
     TracePrintf(1, "EXIT\n");
+    struct pcb *next_proc = qpop();
+    if (next_proc->pid == 0) {
+        TracePrintf(1, "No more waiting procedures, halting");
+        Halt();
+    }
 }
 
 int
@@ -925,7 +939,7 @@ _Brk(void *addr) {
             running_proc->brk = VMEM_0_BASE + ((vpn + 1) * PAGESIZE);
             num_free_pfn --;
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-            TracePrintf(1, "HERE10\n");
+            // TracePrintf(1, "HERE10\n");
         }
     } else {
         TracePrintf(1, "Deallocating\n");
