@@ -28,14 +28,20 @@ struct pcb {
     void *brk;
     int queue;
     // unsigned int kstack_pfns[KERNEL_STACK_PAGES];
+    struct queue_status *status_pointer;
+    struct pcb *parent;
 
-
-    //TODO: definitely need to keep track of more crap. Probably like parent process n stuff?
 };
 
 struct queue_elem {
     struct pcb *proc;
     struct queue_elem *next;
+};
+
+struct queue_status {
+	struct pcb *proc;
+	int status;
+	struct queue_status *next;
 };
 
 // struct page_table {
@@ -87,22 +93,6 @@ struct pcb *init;
 
 unsigned int pid_counter = 0;
 struct pcb *running_proc;
-
-
-
-
-// head -> proc = malloc(sizeof(struct pcb));
-// head -> next = malloc(sizeof(struct queue_elem));
-
-// head -> proc = NULL;
-// head -> next = NULL;
-
-
-// tail -> proc = malloc(sizeof(struct pcb));
-// tail -> proc = malloc(sizeof(struct queue_elem));
-
-// tail -> proc = NULL;
-// tail -> next = NULL;
 
 int delay_ticks = 0;
 struct pcb *delay_proc;
@@ -166,12 +156,7 @@ qpush(struct pcb *proc) {
     new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
 
     new_queue_elem -> proc = proc;
-    // TracePrintf(1, "HERE7\n");
-    // TracePrintf(1, "THIS IS CURRENT NEW QUEUE ELEMENT: %d\n", new_queue_elem -> proc -> pid);
-    // new_queue_elem->next = tail;
-    if (head == NULL) {
-    	// TracePrintf(1, "HEAD IS NULL\n");
-    }
+  
     if (head -> proc == NULL) {
     	// TracePrintf(1, "HERE7.1\n");
     	head = new_queue_elem;
@@ -180,12 +165,12 @@ qpush(struct pcb *proc) {
     } else {
     	tail -> next = new_queue_elem;
     }
-    // TracePrintf(1, "HERE7.1\n");
+    
 
     // TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
     tail = new_queue_elem;
     tail->next = &dummy;
-    // tail = new_queue_elem;
+   
 
     int next_proc_pid = -1;
 
@@ -206,7 +191,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     kernel_brk = orig_brk;
     virtual_memory = 0;
 
-    // CREATE INrERRUPT VECTOR
+    // CREATE INTERRUPT VECTOR
     interrupt_vector[TRAP_KERNEL] = trap_kernel_handler;
     interrupt_vector[TRAP_CLOCK] = trap_clock_handler;
     interrupt_vector[TRAP_ILLEGAL] = trap_illegal_handler;
@@ -879,11 +864,43 @@ _Exit(int status) {
     }
 
     //TODO, CLEAR MEMORY
+
+    //returning status to parent
+    struct queue_status *update_status_elem = running_proc -> parent -> status_pointer;
+
+    while (update_status_elem -> next != NULL) {
+    	update_status_elem = update_status_elem -> next;
+    }
+    update_status_elem -> next = malloc(sizeof(struct queue_status));
+    update_status_elem -> next -> proc = running_proc;
+    update_status_elem -> next -> status = status;
+
+    //"orphaning" children
+    struct queue_elem *next_queue_elem = qpop();
+    while (next_queue_elem != NULL) {
+    	if (next_queue_elem -> proc -> parent == running_proc) {
+    		next_queue_elem -> proc -> parent == NULL;
+    		next_queue_elem = next_queue_elem -> next;
+    	}
+    }
+    //TODO: clear parent in waiting queue when implemented
+
+    //TODO: context switch into next element in waiting queue?
+
+
 }
 
 int
 _Wait(int *status_ptr) {
-    return -1;
+
+	//TODO: I don't know when to context switch?
+
+	int pid_child = running_proc -> status_pointer -> proc -> pid;
+
+    *(status_ptr)= running_proc -> status_pointer -> status;
+    running_proc -> status_pointer = running_proc -> status_pointer -> next; 
+ 
+    return pid_child;
 }
 
 int
