@@ -87,12 +87,29 @@ struct pcb *init;
 unsigned int pid_counter = 0;
 struct pcb *running_proc;
 
-struct queue_elem *head;
-struct queue_elem *tail;
+
+
+
+// head -> proc = malloc(sizeof(struct pcb));
+// head -> next = malloc(sizeof(struct queue_elem));
+
+// head -> proc = NULL;
+// head -> next = NULL;
+
+
+// tail -> proc = malloc(sizeof(struct pcb));
+// tail -> proc = malloc(sizeof(struct queue_elem));
+
+// tail -> proc = NULL;
+// tail -> next = NULL;
 
 int delay_ticks = 0;
 struct pcb *delay_proc;
 
+struct queue_elem dummy;
+struct queue_elem *head = &dummy;
+
+struct queue_elem *tail = &dummy;
 
 unsigned int
 pfnpop() {
@@ -119,38 +136,69 @@ qpop() {
     TracePrintf(1, "QPOP\n");
     struct pcb *proc = head->proc;
     TracePrintf(1, "here1\n");
-    head = head->next;
+    
     TracePrintf(1, "here2\n");
     int head_proc_pid = -1;
-    if (head != NULL) {
+    if (proc != NULL) {
+    	head = head->next;
         TracePrintf(1, "here3\n");
         head_proc_pid = head->proc->pid;
     }
     TracePrintf(1, "here4\n");
     if (proc == NULL) {
-        TracePrintf(1, "proc is null\n");
+    	TracePrintf(1, "proc is null\n");
+    	tail = &dummy;
+    	return idle;
     }
+    
     TracePrintf(1, "QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
     return proc;
 }
 
 void
 qpush(struct pcb *proc) {
+	TracePrintf(1, "proc in qpush function: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
-    new_queue_elem->proc = proc;
-    new_queue_elem->next = tail;
-    // tail->next = new_queue_elem;
+    new_queue_elem -> proc = malloc(sizeof(struct pcb));
+    new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
+    
+    new_queue_elem -> proc = proc;
+    TracePrintf(1, "HERE7\n");
+    TracePrintf(1, "THIS IS CURRENT NEW QUEUE ELEMENT: %d\n", new_queue_elem -> proc -> pid);
+    // new_queue_elem->next = tail;
+    if (head == NULL) {
+    	TracePrintf(1, "HEAD IS NULL\n");
+    }
+    if (head -> proc == NULL) {
+    	TracePrintf(1, "HERE7.1\n");
+    	head = new_queue_elem;
+    	TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
+    }
+    else {
+    	tail -> next = new_queue_elem;
+    }
+    TracePrintf(1, "HERE7.1\n");
+
+    // TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
     tail = new_queue_elem;
+    tail->next = NULL;
+    // tail = new_queue_elem;
+    
     int next_proc_pid = -1;
+
+	TracePrintf(1, "HERE8\n");
+    // TracePrintf(1, "head -> next: %d\n", head -> next);
     if (head->next != NULL) {
+    	TracePrintf(1, "HERE9\n");
         next_proc_pid = head->next->proc->pid;
     }
-    TracePrintf(1, "QPUSH pushed pid %d\t next pid: %d\n", proc->pid, next_proc_pid);
+    TracePrintf(1, "QPUSH pushed pid %d\t next pid: %d\n", head -> proc -> pid, next_proc_pid);
+    // TracePrintf(1, "head: %d, %d\n", head -> proc -> pid, head -> next);
 }
 
 void
 KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args) {
-
+	TracePrintf(1, "address of dummy %x, address of head %x\n", &dummy, head);
     // KEEP TRACK OF THE KERNEL BRK and VIRTUAL MEMORY FLAG
     kernel_brk = orig_brk;
     virtual_memory = 0;
@@ -249,6 +297,9 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
         pfnpush(_i);
     }
 
+
+    // head -> proc = malloc(sizeof(struct pcb));
+    // head -> next = malloc(sizeof(struct queue_elem));
     // IDLE PROCESS
     idle = malloc(sizeof (struct pcb));
     idle -> pid = pid_counter;
@@ -652,7 +703,7 @@ SetKernelBrk(void *addr) {
 
 SavedContext*
 MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
-    TracePrintf(1, "Context Switching\n");
+    TracePrintf(1, "Context Switching");
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
 
@@ -663,6 +714,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     TracePrintf(1, "pcb2: %x\n", pcb2);
     TracePrintf(1, "pcb2->init: %d\n", pcb2->init);
+    TracePrintf(1, "From pid %d to pid %d\n", pcb1 -> pid, pcb2 -> pid);
     if (pcb2->init == 0) {
         pcb2->init = 1;
         copyKernelStack(pcb2);
@@ -707,6 +759,15 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     //     qpush(pcb1);
     // }
     // tail = pcb1;
+   
+    if (pcb1 -> pid != 0) {
+    	TracePrintf(1, "HERE6.1\n");
+    	qpush(pcb1);
+
+    	TracePrintf(1, "HERE6.3\n");
+    }
+
+   	// TracePrintf(1, "head -> proc: %d\n", pcb1);
 
     // Copy current r0 page table to the page table in the PCB
 
@@ -844,6 +905,10 @@ _Brk(void *addr) {
     int num_pages = (UP_TO_PAGE(addr) - UP_TO_PAGE(running_proc->brk)) / PAGESIZE;
     if (num_pages > 0) {
         TracePrintf(1, "Allocating\n");
+        TracePrintf(1, "Running proc pid: %d\n", running_proc -> pid);
+        int num_pages_needed = (UP_TO_PAGE(addr) - UP_TO_PAGE(running_proc->brk)) / PAGESIZE;
+        TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", running_proc->brk, addr, num_pages_needed);
+        // for (_i = num_pages_needed; _i > 0; _i--) {
 
         TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", running_proc->brk, addr, num_pages);
         for (_i = num_pages; _i > 0; _i--) {
@@ -860,6 +925,7 @@ _Brk(void *addr) {
             running_proc->brk = VMEM_0_BASE + ((vpn + 1) * PAGESIZE);
             num_free_pfn --;
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+            TracePrintf(1, "HERE10\n");
         }
     } else {
         TracePrintf(1, "Deallocating\n");
@@ -892,7 +958,7 @@ _Delay(int clock_ticks) {
     TracePrintf(1, "idle addr: %x\n", idle);
     TracePrintf(1, "running_proc addr: %x\n", running_proc);
     // qpush(running_proc);
-    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
+    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, qpop());
 }
 
 int
