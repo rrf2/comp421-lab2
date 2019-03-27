@@ -9,10 +9,6 @@
 #include <stdlib.h>
 
 
-// struct pfn {
-//  unsigned int pfn    : 20;   /* page frame number */
-// };
-
 struct pfn_list_entry {
     unsigned int pfn    : 20;
     struct pfn_list_entry *next;
@@ -25,7 +21,8 @@ struct pcb {
     unsigned int pid;
     SavedContext *ctx;
     struct pte *r0_pointer;
-    void *brk;
+    // void *brk;
+    unsigned long brk;
     int queue;
     // unsigned int kstack_pfns[KERNEL_STACK_PAGES];
     struct queue_status *status_pointer;
@@ -99,8 +96,10 @@ struct pcb *delay_proc;
 
 struct queue_elem dummy;
 struct queue_elem *head = &dummy;
-
 struct queue_elem *tail = &dummy;
+struct queue_elem *waiting = &dummy;
+
+struct queue_status dummy2;
 
 unsigned int
 pfnpop() {
@@ -297,6 +296,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     idle-> r0_pointer = r0_page_table;
     idle->queue = 0;
     idle->ctx = malloc(sizeof(SavedContext));
+    idle -> status_pointer = malloc(sizeof(struct queue_status));
 
 
     init = malloc(sizeof (struct pcb));
@@ -307,6 +307,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     memcpy(init->info, info, sizeof(ExceptionInfo));
     pid_counter++;
     init->ctx = malloc(sizeof(SavedContext));
+    init -> status_pointer = malloc(sizeof(struct queue_status));
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
     memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
     // TracePrintf(1, "malloc\n");
@@ -846,7 +847,12 @@ _Exec(char *filename, char **argvec, ExceptionInfo *info) {
     TracePrintf(1, "EXEC\n");
     // running_proc->init=1;
     // ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, running_proc);
-    LoadProgram(filename, argvec, info);
+    int val = LoadProgram(filename, argvec, info);
+    if (val < 0) {
+    	return ERROR;
+    }
+
+    return 0;
 
 }
 
@@ -875,15 +881,23 @@ _Exit(int status) {
     update_status_elem -> next -> proc = running_proc;
     update_status_elem -> next -> status = status;
 
-    //"orphaning" children
-    struct queue_elem *next_queue_elem = qpop();
+    //"orphaning" children in ready queue
+    struct queue_elem *next_queue_elem;
+    next_queue_elem = head;
     while (next_queue_elem != NULL) {
     	if (next_queue_elem -> proc -> parent == running_proc) {
     		next_queue_elem -> proc -> parent == NULL;
     		next_queue_elem = next_queue_elem -> next;
     	}
     }
-    //TODO: clear parent in waiting queue when implemented
+    //"orphaning" children in waiting queue
+    next_queue_elem = waiting;
+    while (next_queue_elem != NULL) {
+    	if (next_queue_elem -> proc -> parent == running_proc) {
+    		next_queue_elem -> proc -> parent == NULL;
+    		next_queue_elem = next_queue_elem -> next;
+    	}
+    }
 
     //TODO: context switch into next element in waiting queue?
 
@@ -960,9 +974,13 @@ _Brk(void *addr) {
 
 int
 _Delay(int clock_ticks) {
-    // char cmd_args[] = char[1];
-    // cmd_args[0] = "idle";
-    // LoadProgram("idle", cmd_args, info);
+    if (clock_ticks == 0) {
+    	return 0;
+    }
+
+    if (clock_ticks < 0) {
+    	return ERROR;
+    }
     TracePrintf(1, "DELAY\n");
     delay_ticks = clock_ticks;
     delay_proc = running_proc;
@@ -971,6 +989,7 @@ _Delay(int clock_ticks) {
     running_proc->queue = 0;
     // qpush(running_proc);
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, qpop());
+    return 0;
 }
 
 int
@@ -1122,7 +1141,7 @@ void trap_illegal_handler(ExceptionInfo *info) {
 void trap_memory_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: Memory\n");
     if (info -> code == TRAP_MEMORY_MAPERR) {
-        printf("%s%x\n", "No mapping at addr: ", info->addr);
+        printf("%s%p\n", "No mapping at addr: ", info->addr);
         TracePrintf(1, "addr: %x,\tpc: %x\tsp: %x\t\n", info->addr, info->pc, info->sp);
         // TracePrintf(1, "addr: ")
         Halt();
@@ -1135,7 +1154,7 @@ void trap_memory_handler(ExceptionInfo *info) {
     }
 
     if (info -> code == TRAP_MEMORY_KERNEL) {
-        printf("Linux kernel sent SIGSEGV at addr: %x\n", info->addr);
+        printf("Linux kernel sent SIGSEGV at addr: %p\n", info->addr);
         Halt();
         return;
     }
