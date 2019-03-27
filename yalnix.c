@@ -26,6 +26,7 @@ struct pcb {
     SavedContext *ctx;
     struct pte *r0_pointer;
     void *brk;
+    int queue;
     // unsigned int kstack_pfns[KERNEL_STACK_PAGES];
 
 
@@ -133,29 +134,22 @@ pfnpush(unsigned int pfn) {
 
 struct pcb*
 qpop() {
-    TracePrintf(1, "QPOP\n");
     struct pcb *proc = head->proc;
-    TracePrintf(1, "here1\n");
-
-    TracePrintf(1, "here2\n");
     int head_proc_pid = -1;
     if (proc != NULL) {
-        TracePrintf(1, "head addr: %x\n", head);
-        TracePrintf(1, "dummy addr: %x\n", &dummy);
+        // TracePrintf(1, "head addr: %x\n", head);
+        // TracePrintf(1, "dummy addr: %x\n", &dummy);
     	head = head->next;
-        TracePrintf(1, "head addr: %x\n", head);
-        if (dummy.proc == NULL) {
-            TracePrintf(1, "dummy proc is null\n");
-        }
-        TracePrintf(1, "here3\n");
+        // TracePrintf(1, "head addr: %x\n", head);
+        // if (dummy.proc == NULL) {
+        //     // TracePrintf(1, "dummy proc is null\n");
+        // }
         if (head->proc != NULL) {
-            TracePrintf(1, "here3.1\n");
             head_proc_pid = head->proc->pid;
         }
     }
-    TracePrintf(1, "here4\n");
     if (proc == NULL) {
-    	TracePrintf(1, "proc is null\n");
+    	// TracePrintf(1, "proc is null\n");
     	tail = &dummy;
     	return idle;
     }
@@ -166,27 +160,27 @@ qpop() {
 
 void
 qpush(struct pcb *proc) {
-	TracePrintf(1, "proc in qpush function: %d\n", proc -> pid);
+	TracePrintf(1, "QPUSH pid: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
     new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
 
     new_queue_elem -> proc = proc;
-    TracePrintf(1, "HERE7\n");
-    TracePrintf(1, "THIS IS CURRENT NEW QUEUE ELEMENT: %d\n", new_queue_elem -> proc -> pid);
+    // TracePrintf(1, "HERE7\n");
+    // TracePrintf(1, "THIS IS CURRENT NEW QUEUE ELEMENT: %d\n", new_queue_elem -> proc -> pid);
     // new_queue_elem->next = tail;
     if (head == NULL) {
-    	TracePrintf(1, "HEAD IS NULL\n");
+    	// TracePrintf(1, "HEAD IS NULL\n");
     }
     if (head -> proc == NULL) {
-    	TracePrintf(1, "HERE7.1\n");
+    	// TracePrintf(1, "HERE7.1\n");
     	head = new_queue_elem;
         head->next = tail;
-    	TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
+    	// TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
     } else {
     	tail -> next = new_queue_elem;
     }
-    TracePrintf(1, "HERE7.1\n");
+    // TracePrintf(1, "HERE7.1\n");
 
     // TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
     tail = new_queue_elem;
@@ -195,7 +189,7 @@ qpush(struct pcb *proc) {
 
     int next_proc_pid = -1;
 
-	TracePrintf(1, "HERE8\n");
+	// TracePrintf(1, "HERE8\n");
     // TracePrintf(1, "head -> next: %d\n", head -> next);
     // if (head->next != NULL) {
     // 	TracePrintf(1, "HERE9\n");
@@ -316,18 +310,23 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     memcpy(idle->info, info, sizeof(ExceptionInfo));
     pid_counter++;
     idle-> r0_pointer = r0_page_table;
+    idle->queue = 0;
     idle->ctx = malloc(sizeof(SavedContext));
 
 
     init = malloc(sizeof (struct pcb));
     init -> pid = pid_counter;
     init -> init = 0;
+    init->queue = 1;
     init -> info = malloc(sizeof(ExceptionInfo));
     memcpy(init->info, info, sizeof(ExceptionInfo));
     pid_counter++;
+    init->ctx = malloc(sizeof(SavedContext));
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
     memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
-    init -> ctx = malloc(sizeof(SavedContext));
+    // TracePrintf(1, "malloc\n");
+
+    // TracePrintf(1, "&init->ctx:%x\tinit->r0_pointer:%x\n", &init->ctx, init->r0_pointer);
     // init->kstack_pfns = malloc(KERNEL_STACK_PAGES * sizeof(unsigned int));
     // memcpy(init->r0_pointer, r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte)); - removed 3/25
 
@@ -516,7 +515,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         // if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE)  || (entry.pfn * PAGESIZE) > KERNEL_STACK_LIMIT)) {
         if (entry.valid && (i * PAGESIZE < KERNEL_STACK_BASE || i * PAGESIZE > KERNEL_STACK_LIMIT)) {
             entry.valid = 0;
-            TracePrintf(1, "PUSHING back pfn: %d\n", entry.pfn);
+            // TracePrintf(1, "PUSHING back pfn: %d\n", entry.pfn);
             pfnpush(entry.pfn);
             // struct pfn_list_entry new_pfn_entry;
             // new_pfn_entry.pfn = entry.pfn;
@@ -707,81 +706,47 @@ SetKernelBrk(void *addr) {
         }
     }
     kernel_brk = addr;
+    TracePrintf(1, "New brk: %x\n", kernel_brk);
     return (0);
 }
 
 SavedContext*
 MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
-    TracePrintf(1, "Context Switching");
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
-
+    TracePrintf(1, "Context Switching pid: %d to pid: %d\n", pcb1->pid, pcb2->pid);
+    TracePrintf(1, "init->r0_pointer[508].pfn: %d\n", init->r0_pointer[508].pfn);
+    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
+    TracePrintf(1, "ctxp: %x\n", ctxp);
 
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
 
-    TracePrintf(1, "pcb2: %x\n", pcb2);
-    TracePrintf(1, "pcb2->init: %d\n", pcb2->init);
-    TracePrintf(1, "From pid %d to pid %d\n", pcb1 -> pid, pcb2 -> pid);
     if (pcb2->init == 0) {
         pcb2->init = 1;
         copyKernelStack(pcb2);
     }
 
     r0_page_table = pcb2->r0_pointer;
-    // TracePrintf(1, "r0_page_table[508].valid: %d\n", r0_page_table[508].valid);
-
-    // Copy new page table into current page table
-    // memcpy(r0_page_table, pcb2->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
-    // TracePrintf(1, "r0_page_table[16].valid/pfn: %d/%d\n", r0_page_table[16].valid,r0_page_table[16].pfn);
-    // TracePrintf(1, "pcb2 r0_page_table[16].valid/pfn: %d/%d\n", pcb2->r0_pointer[16].valid,pcb2->r0_pointer[16].pfn);
-
-
-
-    // TracePrintf(1, "r0_page_table: %x\n", r0_page_table);
-    // TracePrintf(1, "DOWN_TO_PAGE(&r0_page_table): %x\n", DOWN_TO_PAGE(r0_page_table));
-    // TracePrintf(1, "r0_page_table - DOWN_TO_PAGE(&r0_page_table): %x\n", (int)r0_page_table & PAGEOFFSET);
-    // TracePrintf(1, "vpn: %d\n", DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
-    // TracePrintf(1, "pfn: %d\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
-    // TracePrintf(1, "physaddr: %x\n", physaddr);
     physaddr += (int)r0_page_table & PAGEOFFSET;
-    // TracePrintf(1, "physaddr: %x\n", physaddr);
-    // TracePrintf(1, "pfn: %d\n", DOWN_TO_PAGE(physaddr) / PAGESIZE);
-    // TracePrintf(1, "vpn: %d\t r1_page_table[vpn].pfn: %d\n", (DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN), r1_page_table[24].pfn);
+
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
-    // Switch register pointer
-    // WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
-    // TracePrintf(1, "About to switch REG_PTR0\n");
-    // TracePrintf(1, "pfn: %d\n", ReadRegister(REG_PTR0) / PAGESIZE);
-    // TracePrintf(1, "pfn/valid for vpn 508: %d/%d\n", ((struct pte*)ReadRegister(REG_PTR0))[508].pfn, ((struct pte*)ReadRegister(REG_PTR0))[508].valid);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
-
-    // for (_i = 0; _i < KERNEL_STACK_PAGES; _i ++) {
-    //     r0_page_table[PAGE_TABLE_LEN - KERNEL_STACK_PAGES + _i].pfn = pcb2->kstack_pfns[_i];
-    // }
-    // WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-
-    // if (head == NULL) {
-    //     qpush(pcb1);
-    // }
-    // tail = pcb1;
-
-    if (pcb1 -> pid != 0) {
+    if (pcb1 -> pid != 0 && pcb1->queue) {
     	TracePrintf(1, "HERE6.1\n");
-    	// qpush(pcb1);
+    	qpush(pcb1);
 
     	TracePrintf(1, "HERE6.3\n");
     }
 
-   	// TracePrintf(1, "head -> proc: %d\n", pcb1);
-
-    // Copy current r0 page table to the page table in the PCB
-
     running_proc = pcb2;
-    // TracePrintf(1, "pcb2->ctx: %x\n", &pcb2->ctx);
+    TracePrintf(1, "init->r0_pointer[508].pfn: %d\n", init->r0_pointer[508].pfn);
+    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
+    TracePrintf(1, "&running_proc->ctx: %x\n", &running_proc->ctx);
     return pcb2->ctx;
 }
 
@@ -802,7 +767,7 @@ copyKernelStack(struct pcb *proc) {
         unsigned int pfn = pfnpop();
         r0_page_table[vpn].pfn = pfn;
         proc->r0_pointer[PAGE_TABLE_LEN - KERNEL_STACK_PAGES + _i].pfn = pfn;
-        TracePrintf(1, "Copying to vpn: %d\t addr: %x\t from addr: %x\t w/ pfn:%d\n", vpn, vpn * PAGESIZE, KERNEL_STACK_BASE + (_i * PAGESIZE), pfn);
+        TracePrintf(1, "Copying to vpn: %d\t addr: %x\t from vpn: %d\t w/ pfn:%d\n", vpn, vpn * PAGESIZE, KERNEL_STACK_BASE / PAGESIZE + _i, pfn);
         memcpy(vpn * PAGESIZE, KERNEL_STACK_BASE + (_i * PAGESIZE), PAGESIZE);
         WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
     }
@@ -831,7 +796,7 @@ copyRegion0(struct pcb *proc) {
             r0_page_table[vpn].pfn = pfn;
             memcpy(&proc->r0_pointer[_i], &r0_page_table[_i], sizeof(struct pte));
             proc->r0_pointer[_i].pfn = pfn;
-            TracePrintf(1, "Copying vpn:%d\t with vpn:%d\t and addr:%x\t from addr:%x\t to pfn:%d\n", _i, vpn, vpn * PAGESIZE, _i * PAGESIZE, pfn);
+            TracePrintf(1, "Copying vpn:%d\t with vpn:%d\t and addr:%x\t from vpn:%d\t to pfn:%d\n", _i, vpn, vpn * PAGESIZE, _i, pfn);
             memcpy(vpn * PAGESIZE, _i * PAGESIZE, PAGESIZE);
             WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
         }
@@ -872,11 +837,16 @@ _Fork() {
     child_proc->ctx = malloc(sizeof (SavedContext));
     int new_pid = pid_counter;
     pid_counter ++;
+    child_proc->queue = 0;
     child_proc->pid = new_pid;
+    child_proc->init = 1;
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
     ContextSwitch(MyCloneFunc, &child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
-    ContextSwitch(MySwitchFunc, &running_proc->ctx, running_proc, child_proc);
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
+    TracePrintf(1, "init->r0_pointer[508].pfn: %d\n", init->r0_pointer[508].pfn);
+    TracePrintf(1, "&running_proc->ctx: %x\n", &running_proc->ctx);
+    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, child_proc);
     if (running_proc->pid == new_pid){
         TracePrintf(1, "FORK RETURN CHILD\n");
         return 0;
@@ -888,6 +858,10 @@ _Fork() {
 
 int
 _Exec(char *filename, char **argvec) {
+    TracePrintf(1, "EXEC\n");
+    // running_proc->init=1;
+    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, running_proc);
+    LoadProgram(filename, argvec, running_proc->info);
 
 }
 
@@ -899,6 +873,12 @@ _Exit(int status) {
         TracePrintf(1, "No more waiting procedures, halting");
         Halt();
     }
+    else {
+        TracePrintf(1, "Switching to next process with pid: %d\n", next_proc->pid);
+        ContextSwitch(MySwitchFunc, &running_proc->ctx, running_proc, next_proc);
+    }
+
+    //TODO, CLEAR MEMORY
 }
 
 int
@@ -969,8 +949,9 @@ _Delay(int clock_ticks) {
     TracePrintf(1, "DELAY\n");
     delay_ticks = clock_ticks;
     delay_proc = running_proc;
-    TracePrintf(1, "idle addr: %x\n", idle);
+    // TracePrintf(1, "idle addr: %x\n", idle);
     TracePrintf(1, "running_proc addr: %x\n", running_proc);
+    running_proc->queue = 0;
     // qpush(running_proc);
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, qpop());
 }
@@ -1032,6 +1013,7 @@ void trap_clock_handler(ExceptionInfo *info) {
         // struct pcb *next_proc = qpop();
         // TracePrintf(1, "Next Proc addr: %x\n", next_proc);
         // TracePrintf(1, "Next Proc pid: %d\n", next_proc->pid);
+        delay_proc->queue = 1;
         ContextSwitch(MySwitchFunc, idle->ctx, idle, delay_proc);
     }
     TracePrintf(1, "Exception: Clock\n");
