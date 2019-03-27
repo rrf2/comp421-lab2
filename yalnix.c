@@ -857,11 +857,11 @@ _Fork() {
 }
 
 int
-_Exec(char *filename, char **argvec) {
+_Exec(char *filename, char **argvec, ExceptionInfo *info) {
     TracePrintf(1, "EXEC\n");
     // running_proc->init=1;
-    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, running_proc);
-    LoadProgram(filename, argvec, running_proc->info);
+    // ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, running_proc);
+    LoadProgram(filename, argvec, info);
 
 }
 
@@ -974,7 +974,7 @@ void trap_kernel_handler(ExceptionInfo *info) {
     }
 
     if (code_num == YALNIX_EXEC) {
-        info -> regs[0] = _Exec((char*) info -> regs[1],(char**) info -> regs[2]);
+        info -> regs[0] = _Exec((char*) info -> regs[1], (char**) info -> regs[2], info);
     }
 
     if (code_num == YALNIX_EXIT) {
