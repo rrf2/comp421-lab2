@@ -9,6 +9,7 @@ force(char *addr)
 int
 main()
 {
+    printf("%s\n", "BEGINNING BIG STACK");
     char big_buffer[20*1024];
     int foo;
     int i;

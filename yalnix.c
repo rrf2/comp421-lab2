@@ -1395,13 +1395,14 @@ void trap_clock_handler(ExceptionInfo *info) {
         }
     }
 
+	num_delay_procs -= procs_done_delaying;
 
     if (time % 2 == 0 && ready_head->proc != NULL) {
         TracePrintf(1, "ROUND ROBIN SCHEDULING\n");
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
     }
 
-    num_delay_procs -= procs_done_delaying;
+    
     TracePrintf(1, "Exception: Clock\n");
 }
 
@@ -1411,78 +1412,92 @@ void trap_illegal_handler(ExceptionInfo *info) {
     if (info -> code == TRAP_ILLEGAL_ILLOPC) {
         printf("%s\n", "Illegal opcode");
         TracePrintf(1, "Illegal opcode\n");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_ILLOPN) {
         printf("%s\n", "Illegal operand");
         TracePrintf(1, "Illegal operand\n");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_ILLADR) {
         printf("%s\n", "Illegal addressing mode");
         TracePrintf(1, "Illegal addressing mode\n");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_ILLTRP) {
         printf("%s\n", "Illegal software trap");
         TracePrintf(1, "Illegal software trap\n");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_PRVOPC) {
         printf("%s\n", "Privileged opcode");
         TracePrintf(1, "Privileged opcode\n");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_PRVREG) {
         printf("%s\n", "Privileged register");
         TracePrintf(1, "Privileged register\n");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_COPROC) {
         printf("%s\n", "Coprocessor error");
         TracePrintf(1, "Coprocessor error\n");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_BADSTK) {
         printf("%s\n", "Bad stack");
         TracePrintf(1, "Bad stack\n");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_KERNELI) {
         printf("%s\n", "Linux kernel sent SIGILL");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_USERIB) {
         printf("%s\n", "Received SIGILL or SIGBUS from user");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_ADRALN) {
         printf("%s\n", "Invalid address alignment");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_ADRERR) {
         printf("%s\n", "Non-existent physical address");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_OBJERR) {
         printf("%s\n", "Object-specific HW error");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_ILLEGAL_KERNELB) {
         printf("%s\n", "Linux kernel sent SIGBUS");
+        Halt();
         return;
     }
 
@@ -1500,7 +1515,8 @@ void trap_memory_handler(ExceptionInfo *info) {
     }
 
     if (info -> code == TRAP_MEMORY_ACCERR) {
-        printf("%s\n", "Protection violation at addr");
+        printf("%s%p\n", "Protection violation at addr", info->addr);
+        Halt();
         return;
     }
 
@@ -1512,6 +1528,7 @@ void trap_memory_handler(ExceptionInfo *info) {
 
     if (info -> code == TRAP_MEMORY_USER) {
         printf("%s\n", "Received SIGSEGV from user");
+        Halt();
         return;
     }
 
@@ -1522,51 +1539,61 @@ void trap_math_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: Math\n");
     if (info -> code == TRAP_MATH_INTDIV) {
         printf("%s\n", "Integer divide by zero");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_INTOVF) {
         printf("%s\n", "Integer overflow");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_FLTDIV) {
         printf("%s\n", "Floating divide by zero");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_FLTOVF) {
         printf("%s\n", "Floating overflow");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_FLTUND) {
         printf("%s\n", "Floating underflow");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_FLTRES) {
         printf("%s\n", "Floating inexact result");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_FLTINV) {
         printf("%s\n", "Invalid floating operation");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_FLTSUB) {
         printf("%s\n", "FP subscript out of range");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_KERNEL) {
         printf("%s\n", "Linux kernel sent SIGFPE");
+        Halt();
         return;
     }
 
     if (info -> code == TRAP_MATH_USER) {
         printf("%s\n", "Received SIGFPE from user");
+        Halt();
         return;
     }
 
