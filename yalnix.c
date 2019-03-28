@@ -482,7 +482,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     TracePrintf(1, "r0_page_table addr: %x\n", r0_page_table);
     TracePrintf(1, "initial_r0_page_table addr: %x\n", &initial_r0_page_table);
     TracePrintf(1, "r1_page_table addr: %x\n", r1_page_table);
-    TracePrintf(1, "pmemsize: %d\n", pmem_size);
+    TracePrintf(1, "pmemsize: %x\n", pmem_size);
     TracePrintf(1, "PAGE_TABLE_LEN: %d\n", PAGE_TABLE_LEN);
 
     // CREATE THE FREE LIST AND INITIALIZE REGION 1 PAGE TABLE
@@ -974,7 +974,8 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     TracePrintf(1, "CONTEXT SWITCH pid  %d to %d\n", pcb1->pid, pcb2->pid);
     TracePrintf(1, "ctxp: %x\n", ctxp);
-
+    TracePrintf(1, "pcb1->r0_pointer[508].pfn: %d\n", pcb1->r0_pointer[508].pfn);
+    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -985,11 +986,22 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
         copyKernelStack(pcb2);
     }
 
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
+    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
+
     r0_page_table = pcb2->r0_pointer;
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
+    TracePrintf(1, "r0_page_table: %x\n", r0_page_table);
+    TracePrintf(1, "DOWN_TO_PAGE(r0_page_table): %x\n", DOWN_TO_PAGE(r0_page_table));
+    TracePrintf(1, "DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN: %d\n", DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
+    TracePrintf(1, "r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn: %d\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
+    TracePrintf(1, "physaddr: %x\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE);
     physaddr += (int)r0_page_table & PAGEOFFSET;
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
+    TracePrintf(1, "r0_page_table[508].valid: %d\n", r0_page_table[508].valid);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
     if (pcb1 -> pid != 0 && pcb1->queue) {
     	ready_qpush(pcb1);
     }
@@ -1099,6 +1111,7 @@ _Fork() {
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
     ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
+    TracePrintf(1, "child_proc->r0_pointer[508].pfn: %d\n", child_proc->r0_pointer[508].pfn);
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "SWITCHED\n");
     // TracePrintf(1, "CURRENT READY QUEUE: %d\n", ready_head->proc->pid);
@@ -1395,13 +1408,13 @@ void trap_clock_handler(ExceptionInfo *info) {
         }
     }
 
+    num_delay_procs -= procs_done_delaying;
 
     if (time % 2 == 0 && ready_head->proc != NULL) {
         TracePrintf(1, "ROUND ROBIN SCHEDULING\n");
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
     }
 
-    num_delay_procs -= procs_done_delaying;
     TracePrintf(1, "Exception: Clock\n");
 }
 
