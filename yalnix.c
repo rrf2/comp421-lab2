@@ -42,7 +42,7 @@ struct queue_elem {
 };
 
 struct queue_status {
-	struct pcb *proc;
+	int pid;
 	int status;
 	struct queue_status *next;
 };
@@ -910,6 +910,23 @@ _Exec(char *filename, char **argvec, ExceptionInfo *info) {
 void
 _Exit(int status) {
     TracePrintf(1, "EXIT\n");
+
+    running_proc->exited = 1;
+
+    if (running_proc->parent != NULL && running_proc->parent->exited != 1) {
+
+        struct queue_status *update_status_elem = running_proc -> parent -> status_pointer;
+
+        while (update_status_elem -> next != NULL) {
+            update_status_elem = update_status_elem -> next;
+        }
+
+        update_status_elem -> next = malloc(sizeof(struct queue_status));
+        update_status_elem -> next -> pid = running_proc -> pid;
+        update_status_elem -> next -> status = status;
+
+    }
+
     struct pcb *next_proc = ready_qpop();
     if (next_proc->pid == 0) {
 
@@ -928,18 +945,6 @@ _Exit(int status) {
 
 
     //TODO, CLEAR MEMORY
-    //returning status to parent
-    if (running_proc -> parent -> exited != 1) {
-
-    	struct queue_status *update_status_elem = running_proc -> parent -> status_pointer;
-
-	    while (update_status_elem -> next != NULL) {
-	    	update_status_elem = update_status_elem -> next;
-	    }
-	    update_status_elem -> next = malloc(sizeof(struct queue_status));
-	    update_status_elem -> next -> proc = running_proc;
-	    update_status_elem -> next -> status = status;
-    }
 
     // //"orphaning" children in ready queue
     // struct queue_elem *next_queue_elem;
@@ -978,14 +983,27 @@ _Exit(int status) {
 int
 _Wait(int *status_ptr) {
 
+    TracePrintf(1, "WAITING in pid: %d\n", running_proc->pid);
+
+    TracePrintf(1, "HERE1\n");
+
 	if (running_proc -> status_pointer == NULL) {
+        TracePrintf(1, "HERE2\n");
 		ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
 	}
 
-	int pid_child = running_proc -> status_pointer -> proc -> pid;
+    TracePrintf(1, "HERE3\n");
+
+	int pid_child = running_proc->status_pointer->pid;
+
+    TracePrintf(1, "HERE4\n");
 
     *(status_ptr)= running_proc -> status_pointer -> status;
+
+    TracePrintf(1, "HERE5\n");
     running_proc -> status_pointer = running_proc -> status_pointer -> next;
+
+    TracePrintf(1, "HERE6\n");
 
     return pid_child;
 }
