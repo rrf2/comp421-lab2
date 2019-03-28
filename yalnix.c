@@ -28,6 +28,8 @@ struct pcb {
     struct queue_status *status_pointer;
     struct pcb *parent;
     int delay;
+    struct queue_elem *waiting_head;
+    struct queue_elem *waiting_tail;
 
 };
 
@@ -862,7 +864,16 @@ _Exit(int status) {
 
     //"orphaning" children in ready queue
     struct queue_elem *next_queue_elem;
-    next_queue_elem = head;
+    next_queue_elem = ready_head;
+    while (next_queue_elem != NULL) {
+    	if (next_queue_elem -> proc -> parent == running_proc) {
+    		next_queue_elem -> proc -> parent == NULL;
+    		next_queue_elem = next_queue_elem -> next;
+    	}
+    }
+
+    //"orphaning" children in delay queue
+    next_queue_elem = delay_head;
     while (next_queue_elem != NULL) {
     	if (next_queue_elem -> proc -> parent == running_proc) {
     		next_queue_elem -> proc -> parent == NULL;
@@ -870,7 +881,7 @@ _Exit(int status) {
     	}
     }
     //"orphaning" children in waiting queue
-    next_queue_elem = waiting;
+    next_queue_elem = running_proc -> waiting_head;
     while (next_queue_elem != NULL) {
     	if (next_queue_elem -> proc -> parent == running_proc) {
     		next_queue_elem -> proc -> parent == NULL;
@@ -880,13 +891,14 @@ _Exit(int status) {
 
     //TODO: context switch into next element in waiting queue?
 
-
 }
 
 int
 _Wait(int *status_ptr) {
 
-	//TODO: I don't know when to context switch?
+	if (running_proc -> status_pointer == NULL) {
+		ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
+	}
 
 	int pid_child = running_proc -> status_pointer -> proc -> pid;
 
@@ -1032,6 +1044,7 @@ void trap_clock_handler(ExceptionInfo *info) {
     }
     TracePrintf(1, "Exception: Clock\n");
 }
+
 
 void trap_illegal_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: Illegal\n");
