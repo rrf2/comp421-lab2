@@ -14,7 +14,6 @@ struct pfn_list_entry {
     struct pfn_list_entry *next;
 };
 
-//I MADE THESE CHANGES 3/20/19 -- Lucy
 struct pcb {
     int init;
     ExceptionInfo *info;
@@ -36,8 +35,6 @@ struct pcb {
     int num_children;
 
     int waiting;
-
-
 };
 
 struct queue_elem {
@@ -119,6 +116,23 @@ int num_delay_procs = 0;
 struct queue_elem *waiting = &dummy;
 
 struct queue_status dummy2;
+
+
+struct terminal {
+	int writing_condition;
+	int reading_condition;
+	char *writing_buffer;
+	char reading_buffer[200];
+
+	int new_input_line;
+
+	struct queue_elem *reading_head;
+	struct queue_elem *reading_tail;
+	struct queue_elem *writing_head;
+	struct queue_elem *writing_tail;
+};
+
+struct terminal term[NUM_TERMINALS];
 
 unsigned int
 pfnpop() {
@@ -244,6 +258,21 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     kernel_brk = orig_brk;
     virtual_memory = 0;
 
+    int i;
+    for(i = 0; i < NUM_TERMINALS; i++) {
+    	term[i].writing_buffer = NULL;
+    	term[i].reading_buffer = NULL;
+    	term[i].write_condition = 0;
+    	term[i].read_condition = 0;
+    	term[i].new_input_line = 0;
+
+    	term[i].reading_head = &dummy;
+		term[i].reading_tail = &dummy;
+		term[i].writing_head = &dummy;
+		term[i].writing_tail = &dummy;
+	
+    }
+
     // CREATE INTERRUPT VECTOR
     interrupt_vector[TRAP_KERNEL] = trap_kernel_handler;
     interrupt_vector[TRAP_CLOCK] = trap_clock_handler;
@@ -309,8 +338,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     }
 
     // INITIALIZE REGION 0 PAGE TABLE
-    for (_i = 0; _i < used_pages_min; _i ++) {
-        // TracePrintf(1, "%d\n", _i);
+    for (_i = 0; _i < used_pages_min; _i ++) {      
         entry.pfn = _i;
         if (_i < KERNEL_STACK_BASE / PAGESIZE) {
             entry.valid = 0;
@@ -324,8 +352,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
         initial_r0_page_table[_i] = entry;
     }
 
-    // I MADE THESE CHANGES 3/20/19 -- Lucy
-
 
     WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
     WriteRegister(REG_PTR1, (RCS421RegVal) r1_page_table);
@@ -338,10 +364,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
         pfnpush(_i);
     }
 
-
-    // head -> proc = malloc(sizeof(struct pcb));
-    // head -> next = malloc(sizeof(struct queue_elem));
-    // IDLE PROCESS
     idle = malloc(sizeof (struct pcb));
     idle -> pid = pid_counter;
     idle -> info = malloc(sizeof(ExceptionInfo));
@@ -960,39 +982,7 @@ _Exit(int status) {
 
     }
 
-
-
     //TODO, CLEAR MEMORY
-
-    // //"orphaning" children in ready queue
-    // struct queue_elem *next_queue_elem;
-    // next_queue_elem = ready_head;
-
-    // while (next_queue_elem != NULL) {
-    // 	if (next_queue_elem -> proc -> parent == running_proc) {
-    // 		next_queue_elem -> proc -> parent = NULL;
-    // 		next_queue_elem = next_queue_elem -> next;
-    // 	}
-    // }
-
-    // //"orphaning" children in delay queue
-    // next_queue_elem = delay_head;
-    // while (next_queue_elem != NULL) {
-    // 	if (next_queue_elem -> proc -> parent == running_proc) {
-    // 		next_queue_elem -> proc -> parent = NULL;
-    // 		next_queue_elem = next_queue_elem -> next;
-    // 	}
-    // }
-    // //"orphaning" children in waiting queue
-    // next_queue_elem = running_proc -> waiting_head;
-    // while (next_queue_elem != NULL) {
-    // 	if (next_queue_elem -> proc -> parent == running_proc) {
-    // 		next_queue_elem -> proc -> parent = NULL;
-    // 		next_queue_elem = next_queue_elem -> next;
-    // 	}
-    // }
-
-    //TODO: context switch into next element in waiting queue?
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
 
 
@@ -1364,8 +1354,26 @@ void trap_math_handler(ExceptionInfo *info) {
 
 void trap_tty_receive_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: TTY Receive\n");
+
+    int tty_id = info -> code;
+
+    //Do not know if this is correct
+    int new_input_line = TtyReceive(tty_id, term[tty_id].reading_buffer, TERMINAL_MAX_LINE);
+    term[tty_id].new_input_line = new_input_line;
+
+    //TODO: store return for TtyReceive in kernel stack?
+
+    if(term[tty_id].reading_head != NULL) {
+    	struct pcb *next_read_elem;
+    	next_read_elem = term[tty_id].reading_head -> proc;
+    	term[tty_id].reading_head = term[tty_id].reading_head -> next;
+    	ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, next_read_elem); 
+    }
+
 }
 
 void trap_tty_transmit_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: TTY Transmit\n");
+    int tty_id = info -> code;
+    ContextSwitch(MySwitchFunc, running_proc -> ctx, running_proc, term[tty_id].writing_head);
 }
