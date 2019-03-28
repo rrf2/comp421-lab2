@@ -615,6 +615,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         vpn ++;
     }
     running_proc->brk = vpn * PAGESIZE;
+    TracePrintf(1, "BRK set to: %x\n", running_proc->brk);
 
     /* And finally the user stack pages */
     // >>>> For stack_npg number of PTEs in the Region 0 page table
@@ -752,15 +753,12 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
-
     if (delay_head->proc != NULL)
         TracePrintf(1, "1 - delay_head pid1: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
-
     if (pcb2->init == 0) {
         pcb2->init = 1;
         copyKernelStack(pcb2);
     }
-
     if (delay_head->proc != NULL)
         TracePrintf(1, "2 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
 
@@ -769,18 +767,15 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     physaddr += (int)r0_page_table & PAGEOFFSET;
     if (delay_head->proc != NULL)
         TracePrintf(1, "3 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
-
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
     if (delay_head->proc != NULL)
         TracePrintf(1, "4 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
-
     if (pcb1 -> pid != 0 && pcb1->queue) {
     	ready_qpush(pcb1);
     }
     if (delay_head->proc != NULL)
         TracePrintf(1, "5 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
-
     running_proc = pcb2;
     return pcb2->ctx;
 }
@@ -878,6 +873,7 @@ _Fork() {
     child_proc->queue = 0;
     child_proc->pid = new_pid;
     child_proc->init = 1;
+    child_proc->brk = running_proc->brk;
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
     ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
@@ -983,20 +979,25 @@ _Brk(void *addr) {
     // if (brk > running_proc->brk) {
     int num_pages = (UP_TO_PAGE(addr) - UP_TO_PAGE(running_proc->brk)) / PAGESIZE;
     if (num_pages > 0) {
-        TracePrintf(1, "Allocating\n");
-        TracePrintf(1, "Running proc pid: %d\n", running_proc -> pid);
-        int num_pages_needed = (UP_TO_PAGE(addr) - UP_TO_PAGE(running_proc->brk)) / PAGESIZE;
-        TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", running_proc->brk, addr, num_pages_needed);
-        // for (_i = num_pages_needed; _i > 0; _i--) {
+        TracePrintf(1, "Allocating for proc pid: %d\n", running_proc->pid);
+        // TracePrintf(1, "Running proc pid: %d\n", running_proc -> pid);
 
         TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", running_proc->brk, addr, num_pages);
+
         for (_i = num_pages; _i > 0; _i--) {
             if (num_free_pfn <= 0) {
                 return ERROR;
             }
             unsigned int pfn = pfnpop();
             int vpn = ((unsigned long)running_proc->brk) / PAGESIZE;
-            // TracePrintf(1, "Mallocing VPN: %d\t to PFN: %d\n", vpn, pfn);
+            TracePrintf(1, "Mallocing VPN: %d\t to PFN: %d\n", vpn, pfn);
+
+            if (r0_page_table[vpn].valid) {
+                // Ran into stack
+                TracePrintf(1, "Ran into stack in Brk()\n");
+                return ERROR;
+            }
+
             r0_page_table[vpn].valid = 1;
             r0_page_table[vpn].pfn = pfn;
             r0_page_table[vpn].uprot = PROT_READ | PROT_WRITE;
@@ -1012,7 +1013,7 @@ _Brk(void *addr) {
         for (_i = num_pages; _i > 0; _i--) {
             int vpn = ((unsigned long)UP_TO_PAGE(running_proc->brk)) / PAGESIZE - 1;
             unsigned int pfn = r0_page_table[vpn].pfn;
-            // TracePrintf(1, "Freeing VPN: %d\t with PFN: %d\n", vpn, pfn);
+            TracePrintf(1, "Freeing VPN: %d\t with PFN: %d\n", vpn, pfn);
             pfnpush(pfn);
             r0_page_table[vpn].valid = 0;
             running_proc->brk = vpn * PAGESIZE;
