@@ -1073,12 +1073,23 @@ copyRegion0(struct pcb *proc) {
 
 SavedContext*
 MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
-    TracePrintf(1, "Cloning\n");
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
+    TracePrintf(1, "CLONGING pid: %d\n", pcb2->pid);
     TracePrintf(1, "ctxp: %x\n", ctxp);
 
-    pcb2->r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    TracePrintf(1, "kernel_brk: %x\n", kernel_brk);
+    int vpn = (int) kernel_brk / PAGESIZE - PAGE_TABLE_LEN;
+    r1_page_table[vpn].valid = 1;
+    r1_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+    r1_page_table[vpn].pfn = pfnpop();
+    pcb2->r0_pointer = kernel_brk;
+    kernel_brk += PAGESIZE;
+    TracePrintf(1, "Set r0_pointer to vpn: %d, new kernel_brk: %x with pfn: %d\n", vpn, kernel_brk, r1_page_table[vpn].pfn);
+    TracePrintf(1, "vpn - 1, valid: %d, %d\n", vpn - 1, r1_page_table[vpn - 1].valid);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
+
+    // UP_TO_PAGE(malloc(PAGE_TABLE_LEN * sizeof(struct pte)));
 
     // memcpy(pcb2->r0_pointer, pcb1->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
 
