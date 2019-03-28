@@ -27,7 +27,12 @@ struct pcb {
     // unsigned int kstack_pfns[KERNEL_STACK_PAGES];
     struct queue_status *status_pointer;
     struct pcb *parent;
+
+    int delay;
+    int exited;
+
     int end_of_delay;
+
 
 };
 
@@ -744,6 +749,8 @@ SetKernelBrk(void *addr) {
 
 SavedContext*
 MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
+
+	TracePrintf(1, "HERE1%p\n", p2);
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
 
@@ -759,23 +766,18 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
         pcb2->init = 1;
         copyKernelStack(pcb2);
     }
-    if (delay_head->proc != NULL)
-        TracePrintf(1, "2 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
 
     r0_page_table = pcb2->r0_pointer;
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
     physaddr += (int)r0_page_table & PAGEOFFSET;
-    if (delay_head->proc != NULL)
-        TracePrintf(1, "3 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
+    r0_page_table = pcb2->r0_pointer;
+    int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
+    physaddr += (int)r0_page_table & PAGEOFFSET;
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-    if (delay_head->proc != NULL)
-        TracePrintf(1, "4 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
     if (pcb1 -> pid != 0 && pcb1->queue) {
     	ready_qpush(pcb1);
     }
-    if (delay_head->proc != NULL)
-        TracePrintf(1, "5 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
     running_proc = pcb2;
     return pcb2->ctx;
 }
@@ -874,10 +876,13 @@ _Fork() {
     child_proc->pid = new_pid;
     child_proc->init = 1;
     child_proc->brk = running_proc->brk;
+    child_proc -> parent = running_proc;
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
     ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, child_proc);
+
+    TracePrintf(1, "CURRENT READY QUEUE: %d\n", ready_head -> proc -> pid);
     if (running_proc->pid == new_pid){
         TracePrintf(1, "FORK RETURN CHILD\n");
         return 0;
@@ -915,41 +920,58 @@ _Exit(int status) {
         Halt();
     }
     else {
-        TracePrintf(1, "Switching to next process with pid: %d\n", next_proc->pid);
+    	TracePrintf(1, "HERE7\n");
+        TracePrintf(1, "Switching to next process with pid: %d and %d\n", running_proc -> pid, next_proc->pid);
         ContextSwitch(MySwitchFunc, &running_proc->ctx, running_proc, next_proc);
+
     }
+
+
 
     //TODO, CLEAR MEMORY
-
     //returning status to parent
-    struct queue_status *update_status_elem = running_proc -> parent -> status_pointer;
+    if (running_proc -> parent -> exited != 1) {
 
-    while (update_status_elem -> next != NULL) {
-    	update_status_elem = update_status_elem -> next;
-    }
-    update_status_elem -> next = malloc(sizeof(struct queue_status));
-    update_status_elem -> next -> proc = running_proc;
-    update_status_elem -> next -> status = status;
+    	struct queue_status *update_status_elem = running_proc -> parent -> status_pointer;
 
-    //"orphaning" children in ready queue
-    struct queue_elem *next_queue_elem;
-    next_queue_elem = ready_head;
-    while (next_queue_elem != NULL) {
-    	if (next_queue_elem -> proc -> parent == running_proc) {
-    		next_queue_elem -> proc -> parent == NULL;
-    		next_queue_elem = next_queue_elem -> next;
-    	}
+	    while (update_status_elem -> next != NULL) {
+	    	update_status_elem = update_status_elem -> next;
+	    }
+	    update_status_elem -> next = malloc(sizeof(struct queue_status));
+	    update_status_elem -> next -> proc = running_proc;
+	    update_status_elem -> next -> status = status;
     }
-    //"orphaning" children in waiting queue
-    next_queue_elem = waiting;
-    while (next_queue_elem != NULL) {
-    	if (next_queue_elem -> proc -> parent == running_proc) {
-    		next_queue_elem -> proc -> parent == NULL;
-    		next_queue_elem = next_queue_elem -> next;
-    	}
-    }
+
+    // //"orphaning" children in ready queue
+    // struct queue_elem *next_queue_elem;
+    // next_queue_elem = ready_head;
+
+    // while (next_queue_elem != NULL) {
+    // 	if (next_queue_elem -> proc -> parent == running_proc) {
+    // 		next_queue_elem -> proc -> parent = NULL;
+    // 		next_queue_elem = next_queue_elem -> next;
+    // 	}
+    // }
+
+    // //"orphaning" children in delay queue
+    // next_queue_elem = delay_head;
+    // while (next_queue_elem != NULL) {
+    // 	if (next_queue_elem -> proc -> parent == running_proc) {
+    // 		next_queue_elem -> proc -> parent = NULL;
+    // 		next_queue_elem = next_queue_elem -> next;
+    // 	}
+    // }
+    // //"orphaning" children in waiting queue
+    // next_queue_elem = running_proc -> waiting_head;
+    // while (next_queue_elem != NULL) {
+    // 	if (next_queue_elem -> proc -> parent == running_proc) {
+    // 		next_queue_elem -> proc -> parent = NULL;
+    // 		next_queue_elem = next_queue_elem -> next;
+    // 	}
+    // }
 
     //TODO: context switch into next element in waiting queue?
+    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
 
 
 }
@@ -957,7 +979,9 @@ _Exit(int status) {
 int
 _Wait(int *status_ptr) {
 
-	//TODO: I don't know when to context switch?
+	if (running_proc -> status_pointer == NULL) {
+		ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
+	}
 
 	int pid_child = running_proc -> status_pointer -> proc -> pid;
 
@@ -1126,6 +1150,7 @@ void trap_clock_handler(ExceptionInfo *info) {
     num_delay_procs -= procs_done_delaying;
     TracePrintf(1, "Exception: Clock\n");
 }
+
 
 void trap_illegal_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: Illegal\n");
