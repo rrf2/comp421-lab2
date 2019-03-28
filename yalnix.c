@@ -61,8 +61,8 @@ struct pte r1_page_table[PAGE_TABLE_LEN];
 void KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args);
 unsigned int pfnpop();
 void pfnpush(unsigned int pfn);
-struct pcb* qpop();
-void qpush(struct pcb *proc);
+struct pcb* ready_qpop();
+void ready_qpush(struct pcb *proc);
 int LoadProgram(char *name, char **args, ExceptionInfo *info);
 void trap_kernel_handler(ExceptionInfo *info);
 void trap_clock_handler(ExceptionInfo *info);
@@ -96,8 +96,8 @@ int delay_ticks = 0;
 struct pcb *delay_proc;
 
 struct queue_elem dummy;
-struct queue_elem *head = &dummy;
-struct queue_elem *tail = &dummy;
+struct queue_elem *ready_head = &dummy;
+struct queue_elem *ready_tail = &dummy;
 
 struct queue_elem *waiting = &dummy;
 
@@ -124,24 +124,24 @@ pfnpush(unsigned int pfn) {
 }
 
 struct pcb*
-qpop() {
-    struct pcb *proc = head->proc;
+ready_qpop() {
+    struct pcb *proc = ready_head->proc;
     int head_proc_pid = -1;
     if (proc != NULL) {
         // TracePrintf(1, "head addr: %x\n", head);
         // TracePrintf(1, "dummy addr: %x\n", &dummy);
-    	head = head->next;
+    	ready_head = ready_head->next;
         // TracePrintf(1, "head addr: %x\n", head);
         // if (dummy.proc == NULL) {
         //     // TracePrintf(1, "dummy proc is null\n");
         // }
-        if (head->proc != NULL) {
-            head_proc_pid = head->proc->pid;
+        if (ready_head->proc != NULL) {
+            head_proc_pid = ready_head->proc->pid;
         }
     }
     if (proc == NULL) {
     	// TracePrintf(1, "proc is null\n");
-    	tail = &dummy;
+    	ready_tail = &dummy;
     	return idle;
     }
 
@@ -150,7 +150,7 @@ qpop() {
 }
 
 void
-qpush(struct pcb *proc) {
+ready_qpush(struct pcb *proc) {
 	TracePrintf(1, "QPUSH pid: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
@@ -159,30 +159,17 @@ qpush(struct pcb *proc) {
     new_queue_elem -> proc = proc;
 
     if (head -> proc == NULL) {
-    	// TracePrintf(1, "HERE7.1\n");
     	head = new_queue_elem;
         head->next = tail;
-    	// TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
     } else {
     	tail -> next = new_queue_elem;
     }
 
-
-    // TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
     tail = new_queue_elem;
     tail->next = &dummy;
 
-
     int next_proc_pid = -1;
 
-	// TracePrintf(1, "HERE8\n");
-    // TracePrintf(1, "head -> next: %d\n", head -> next);
-    // if (head->next != NULL) {
-    // 	TracePrintf(1, "HERE9\n");
-    //     next_proc_pid = head->next->proc->pid;
-    // }
-    // TracePrintf(1, "QPUSH pushed pid %d\t next pid: %d\n", head -> proc -> pid, next_proc_pid);
-    // TracePrintf(1, "head: %d, %d\n", head -> proc -> pid, head -> next);
 }
 
 void
@@ -720,7 +707,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
     if (pcb1 -> pid != 0 && pcb1->queue) {
-    	qpush(pcb1);
+    	ready_qpush(pcb1);
     }
 
     running_proc = pcb2;
@@ -847,7 +834,7 @@ _Exec(char *filename, char **argvec, ExceptionInfo *info) {
 void
 _Exit(int status) {
     TracePrintf(1, "EXIT\n");
-    struct pcb *next_proc = qpop();
+    struct pcb *next_proc = ready_qpop();
     if (next_proc->pid == 0) {
 
         if (delay_ticks > 0) {
@@ -979,7 +966,7 @@ _Delay(int clock_ticks) {
     TracePrintf(1, "setting delay->proc to pid: %d\n", running_proc->pid);
     running_proc->queue = 0;
     // qpush(running_proc);
-    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, qpop());
+    ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
     return 0;
 }
 
