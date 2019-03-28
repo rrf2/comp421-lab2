@@ -750,7 +750,6 @@ SetKernelBrk(void *addr) {
 SavedContext*
 MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
-	TracePrintf(1, "HERE1%p\n", p2);
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
 
@@ -770,15 +769,16 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     r0_page_table = pcb2->r0_pointer;
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
     physaddr += (int)r0_page_table & PAGEOFFSET;
-    r0_page_table = pcb2->r0_pointer;
-    int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
-    physaddr += (int)r0_page_table & PAGEOFFSET;
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
     if (pcb1 -> pid != 0 && pcb1->queue) {
     	ready_qpush(pcb1);
     }
     running_proc = pcb2;
+    TracePrintf(1, "pcb2 addr: %x\n", pcb2);
+    TracePrintf(1, "init addr: %x\n", init);
+    TracePrintf(1, "init->ctx addr: %x\n", init->ctx);
+    TracePrintf(1, "pcb2->ctx addr: %x\n", pcb2->ctx);
     return pcb2->ctx;
 }
 
@@ -881,14 +881,14 @@ _Fork() {
     ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, child_proc);
-
-    TracePrintf(1, "CURRENT READY QUEUE: %d\n", ready_head -> proc -> pid);
+    TracePrintf(1, "SWITCHED\n");
+    // TracePrintf(1, "CURRENT READY QUEUE: %d\n", ready_head->proc->pid);
     if (running_proc->pid == new_pid){
         TracePrintf(1, "FORK RETURN CHILD\n");
         return 0;
     } else {
         TracePrintf(1, "FORK RETURN PARENT\n");
-        TracePrintf(1, "delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
+        // TracePrintf(1, "delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
         return new_pid;
     }
 }
@@ -920,9 +920,8 @@ _Exit(int status) {
         Halt();
     }
     else {
-    	TracePrintf(1, "HERE7\n");
         TracePrintf(1, "Switching to next process with pid: %d and %d\n", running_proc -> pid, next_proc->pid);
-        ContextSwitch(MySwitchFunc, &running_proc->ctx, running_proc, next_proc);
+        ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, next_proc);
 
     }
 
