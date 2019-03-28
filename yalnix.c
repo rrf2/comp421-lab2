@@ -14,7 +14,6 @@ struct pfn_list_entry {
     struct pfn_list_entry *next;
 };
 
-//I MADE THESE CHANGES 3/20/19 -- Lucy
 struct pcb {
     int init;
     ExceptionInfo *info;
@@ -36,8 +35,6 @@ struct pcb {
     int num_children;
 
     int waiting;
-
-
 };
 
 struct queue_elem {
@@ -49,6 +46,12 @@ struct queue_status {
 	int pid;
 	int status;
 	struct queue_status *next;
+};
+
+struct buf_queue_elem {
+    char *buf;
+    int len;
+    struct buf_queue_elem *next;
 };
 
 // struct page_table {
@@ -116,15 +119,30 @@ struct queue_elem *delay_head = &dummy;
 struct queue_elem *delay_tail = &dummy;
 int num_delay_procs = 0;
 
-struct queue_elem *waiting = &dummy;
+struct buf_queue_elem buf_dummy;
 
-struct queue_status dummy2;
+// <<<<<<< HEAD
+// struct queue_elem *ttyread_head[NUM_TERMINALS];
+// struct queue_elem *ttyread_tail[NUM_TERMINALS];
 
-struct queue_elem *ttyread_head[NUM_TERMINALS];
-struct queue_elem *ttyread_tail[NUM_TERMINALS];
+// struct queue_elem *ttywrite_head[NUM_TERMINALS];
+// struct queue_elem *ttywrite_tail[NUM_TERMINALS];
+// =======
 
-struct queue_elem *ttywrite_head[NUM_TERMINALS];
-struct queue_elem *ttywrite_tail[NUM_TERMINALS];
+struct terminal {
+	struct buf_queue_elem *writing_buffer_head;
+    struct buf_queue_elem *writing_buffer_tail;
+	struct buf_queue_elem *reading_buffer_head;
+    struct buf_queue_elem *reading_buffer_tail;
+
+	struct queue_elem *reading_head;
+	struct queue_elem *reading_tail;
+	struct queue_elem *writing_head;
+	struct queue_elem *writing_tail;
+};
+
+struct terminal term[NUM_TERMINALS];
+// >>>>>>> f8e19e656f60ed3ae20959810be8db3c1ce4aba4
 
 unsigned int
 pfnpop() {
@@ -238,30 +256,8 @@ delay_qpush(struct pcb *proc) {
 
     TracePrintf(1, "delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
     int next_proc_pid = -1;
-
 }
 
-struct pcb*
-ttyread_qpop(int tty_id) {
-    struct pcb *proc = ttyread_head[tty_id]->proc;
-    int head_proc_pid = -1;
-    if (proc != NULL) {
-
-        ttyread_head[tty_id] = ttyread_head[tty_id]->next;
-
-        if (ttyread_head[tty_id]->proc != NULL) {
-            head_proc_pid = ttyread_head[tty_id]->proc->pid;
-        }
-    }
-    if (proc == NULL) {
-        // TracePrintf(1, "proc is null\n");
-        ttyread_tail[tty_id] = &dummy;
-        return idle;
-    }
-
-    TracePrintf(1, "TTYREAD QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
-    return proc;
-}
 
 void
 ttyread_qpush(int tty_id, struct pcb *proc) {
@@ -272,40 +268,17 @@ ttyread_qpush(int tty_id, struct pcb *proc) {
 
     new_queue_elem -> proc = proc;
 
-    if (ttyread_head[tty_id] -> proc == NULL) {
-        ttyread_head[tty_id] = new_queue_elem;
-        ttyread_head[tty_id]->next = ttyread_tail[tty_id];
+    if (term[tty_id].reading_head -> proc == NULL) {
+        term[tty_id].reading_head = new_queue_elem;
+        term[tty_id].reading_head->next = term[tty_id].reading_tail;
     } else {
-        ttyread_tail[tty_id] -> next = new_queue_elem;
+        term[tty_id].reading_tail -> next = new_queue_elem;
     }
 
-    ttyread_tail[tty_id] = new_queue_elem;
-    ttyread_tail[tty_id]->next = &dummy;
+    term[tty_id].reading_tail = new_queue_elem;
+    term[tty_id].reading_tail->next = &dummy;
 
     int next_proc_pid = -1;
-
-}
-
-struct pcb*
-ttywrite_qpop(int tty_id) {
-    struct pcb *proc = ttywrite_head[tty_id]->proc;
-    int head_proc_pid = -1;
-    if (proc != NULL) {
-
-        ttywrite_head[tty_id] = ttywrite_head[tty_id]->next;
-
-        if (ttywrite_head[tty_id]>proc != NULL) {
-            head_proc_pid = ttywrite_head[tty_id]->proc->pid;
-        }
-    }
-    if (proc == NULL) {
-        // TracePrintf(1, "proc is null\n");
-        ttywrite_tail[tty_id] = &dummy;
-        return idle;
-    }
-
-    TracePrintf(1, "TTYWRITE QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
-    return proc;
 }
 
 void
@@ -317,19 +290,158 @@ ttywrite_qpush(int tty_id, struct pcb *proc) {
 
     new_queue_elem -> proc = proc;
 
-    if (ttywrite_head[tty_id] -> proc == NULL) {
-        ttywrite_head[tty_id] = new_queue_elem;
-        ttywrite_head[tty_id]->next = ttywrite_tail[tty_id];
+    if (term[tty_id].writing_head -> proc == NULL) {
+        term[tty_id].writing_head = new_queue_elem;
+        term[tty_id].writing_head->next = term[tty_id].writing_tail;
     } else {
-        ttywrite_tail[tty_id] -> next = new_queue_elem;
+        term[tty_id].writing_tail -> next = new_queue_elem;
     }
 
-    ttywrite_tail[tty_id] = new_queue_elem;
-    ttywrite_tail[tty_id]->next = &dummy;
+    term[tty_id].writing_tail = new_queue_elem;
+    term[tty_id].writing_tail->next = &dummy;
 
     int next_proc_pid = -1;
-
 }
+
+struct pcb*
+ttyread_qpop(int tty_id) {
+    struct pcb *proc = term[tty_id].reading_head->proc;
+    int head_proc_pid = -1;
+    if (proc != NULL) {
+
+        term[tty_id].reading_head = term[tty_id].reading_head->next;
+
+        if (term[tty_id].reading_head->proc != NULL) {
+            head_proc_pid = term[tty_id].reading_head->proc->pid;
+        }
+    }
+    if (proc == NULL) {
+        // TracePrintf(1, "proc is null\n");
+        term[tty_id].reading_tail = &dummy;
+        return idle;
+    }
+
+    TracePrintf(1, "TTYREAD QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
+    return proc;
+}
+
+struct pcb*
+ttywrite_qpop(int tty_id) {
+    struct pcb *proc = term[tty_id].writing_head->proc;
+    int head_proc_pid = -1;
+    if (proc != NULL) {
+
+        term[tty_id].writing_head = term[tty_id].writing_head->next;
+
+        if (term[tty_id].writing_head->proc != NULL) {
+            head_proc_pid = term[tty_id].writing_head->proc->pid;
+        }
+    }
+    if (proc == NULL) {
+        // TracePrintf(1, "proc is null\n");
+        term[tty_id].writing_tail = &dummy;
+        return idle;
+    }
+
+    TracePrintf(1, "TTYWRITE QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
+    return proc;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+void
+ttybufread_qpush(int tty_id, char *buf, int len) {
+    TracePrintf(1, "TTYREAD QPUSH\n");
+    struct buf_queue_elem *new_queue_elem = malloc(sizeof (struct buf_queue_elem*));
+    new_queue_elem -> buf = buf;
+    new_queue_elem -> len = len;
+
+    if (term[tty_id].reading_buffer_head -> buf == NULL) {
+        term[tty_id].reading_buffer_head = new_queue_elem;
+        term[tty_id].reading_buffer_head->next = term[tty_id].reading_buffer_tail;
+    } else {
+        term[tty_id].reading_buffer_tail -> next = new_queue_elem;
+    }
+
+    term[tty_id].reading_buffer_tail = new_queue_elem;
+    term[tty_id].reading_buffer_tail->next = &buf_dummy;
+
+    int next_proc_pid = -1;
+}
+
+void
+ttybufwrite_qpush(int tty_id, char *buf, int len) {
+    TracePrintf(1, "TTYREAD QPUSH\n");
+    struct buf_queue_elem *new_queue_elem = malloc(sizeof (struct buf_queue_elem*));
+    new_queue_elem -> buf = buf;
+    new_queue_elem -> len = len;
+
+    if (term[tty_id].writing_buffer_head -> buf == NULL) {
+        term[tty_id].writing_buffer_head = new_queue_elem;
+        term[tty_id].writing_buffer_head->next = term[tty_id].writing_buffer_tail;
+    } else {
+        term[tty_id].writing_buffer_tail -> next = new_queue_elem;
+    }
+
+    term[tty_id].writing_buffer_tail = new_queue_elem;
+    term[tty_id].writing_buffer_tail->next = &buf_dummy;
+
+    int next_proc_pid = -1;
+}
+
+struct pcb*
+ttybufread_qpop(int tty_id) {
+    char *buf = term[tty_id].reading_buffer_head->buf;
+    if (buf != NULL) {
+        term[tty_id].reading_buffer_head = term[tty_id].reading_buffer_head->next;
+    }
+    if (buf == NULL) {
+        // TracePrintf(1, "proc is null\n");
+        term[tty_id].reading_buffer_tail = &buf_dummy;
+        return NULL;
+    }
+
+    TracePrintf(1, "TTYREAD QPOP\n");
+    return buf;
+}
+
+struct pcb*
+ttybufwrite_qpop(int tty_id) {
+    char *buf = term[tty_id].writing_buffer_head->buf;
+    if (buf != NULL) {
+        term[tty_id].writing_buffer_head = term[tty_id].writing_buffer_head->next;
+    }
+    if (buf == NULL) {
+        // TracePrintf(1, "proc is null\n");
+        term[tty_id].writing_buffer_tail = &buf_dummy;
+        return NULL;
+    }
+
+    TracePrintf(1, "TTYREAD QPOP\n");
+    return buf;
+}
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -339,6 +451,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     // KEEP TRACK OF THE KERNEL BRK and VIRTUAL MEMORY FLAG
     kernel_brk = orig_brk;
     virtual_memory = 0;
+
 
     // CREATE INTERRUPT VECTOR
     interrupt_vector[TRAP_KERNEL] = trap_kernel_handler;
@@ -406,7 +519,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
     // INITIALIZE REGION 0 PAGE TABLE
     for (_i = 0; _i < used_pages_min; _i ++) {
-        // TracePrintf(1, "%d\n", _i);
         entry.pfn = _i;
         if (_i < KERNEL_STACK_BASE / PAGESIZE) {
             entry.valid = 0;
@@ -420,8 +532,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
         initial_r0_page_table[_i] = entry;
     }
 
-    // I MADE THESE CHANGES 3/20/19 -- Lucy
-
 
     WriteRegister(REG_PTR0, (RCS421RegVal) r0_page_table);
     WriteRegister(REG_PTR1, (RCS421RegVal) r1_page_table);
@@ -434,17 +544,19 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
         pfnpush(_i);
     }
 
-    for (_i=0; _i<NUM_TERMINALS; _i++) {
-        ttyread_head[_i] = &dummy;
-        ttyread_tail[_i] = &dummy;
-        ttywrite_head[_i] = &dummy;
-        ttywrite_tail[_i] = &dummy;
+    for(_i = 0; _i < NUM_TERMINALS; _i++) {
+        term[_i].writing_buffer_head = &buf_dummy;
+        term[_i].reading_buffer_head = &buf_dummy;
+        term[_i].writing_buffer_tail = &buf_dummy;
+        term[_i].reading_buffer_tail = &buf_dummy;
+
+        term[_i].reading_head = &dummy;
+        term[_i].reading_tail = &dummy;
+        term[_i].writing_head = &dummy;
+        term[_i].writing_tail = &dummy;
     }
 
 
-    // head -> proc = malloc(sizeof(struct pcb));
-    // head -> next = malloc(sizeof(struct queue_elem));
-    // IDLE PROCESS
     idle = malloc(sizeof (struct pcb));
     idle -> pid = pid_counter;
     idle -> info = malloc(sizeof(ExceptionInfo));
@@ -1063,39 +1175,7 @@ _Exit(int status) {
 
     }
 
-
-
     //TODO, CLEAR MEMORY
-
-    // //"orphaning" children in ready queue
-    // struct queue_elem *next_queue_elem;
-    // next_queue_elem = ready_head;
-
-    // while (next_queue_elem != NULL) {
-    // 	if (next_queue_elem -> proc -> parent == running_proc) {
-    // 		next_queue_elem -> proc -> parent = NULL;
-    // 		next_queue_elem = next_queue_elem -> next;
-    // 	}
-    // }
-
-    // //"orphaning" children in delay queue
-    // next_queue_elem = delay_head;
-    // while (next_queue_elem != NULL) {
-    // 	if (next_queue_elem -> proc -> parent == running_proc) {
-    // 		next_queue_elem -> proc -> parent = NULL;
-    // 		next_queue_elem = next_queue_elem -> next;
-    // 	}
-    // }
-    // //"orphaning" children in waiting queue
-    // next_queue_elem = running_proc -> waiting_head;
-    // while (next_queue_elem != NULL) {
-    // 	if (next_queue_elem -> proc -> parent == running_proc) {
-    // 		next_queue_elem -> proc -> parent = NULL;
-    // 		next_queue_elem = next_queue_elem -> next;
-    // 	}
-    // }
-
-    //TODO: context switch into next element in waiting queue?
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
 
 
@@ -1219,14 +1299,34 @@ _Delay(int clock_ticks) {
 
 int
 _TtyRead(int tty_id, void *buf, int len) {
-    return -1;
+    char *linebuf;
+    if (term[tty_id].reading_buffer_head->buf == NULL) {
+        ttyread_qpush(tty_id, running_proc);
+        ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
+        linebuf = ttybufread_qpop(tty_id);
+    }
+    if (linebuf != NULL) {
+        memcpy(buf, linebuf, len);
+        return len;
+    }
+    return ERROR;
 }
 
 int
 _TtyWrite(int tty_id, void *buf, int len) {
     char *charbuf = malloc(len);
     memcpy(charbuf, buf, len);
-    TtyTransmit(tty_id, charbuf, len);
+
+    if (term[tty_id].writing_head->proc == NULL) {
+        TtyTransmit(tty_id, charbuf, len);
+        return len;
+    } else {
+        // ttybufwrite_qpush(tty_id, charbuf);
+        ttywrite_qpush(tty_id, running_proc);
+        ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
+        TtyTransmit(tty_id, charbuf, len);
+        return len;
+    }
 }
 
 void trap_kernel_handler(ExceptionInfo *info) {
@@ -1469,8 +1569,38 @@ void trap_math_handler(ExceptionInfo *info) {
 
 void trap_tty_receive_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: TTY Receive\n");
+
+    int tty_id = info->code;
+    char *buf1 = malloc(TERMINAL_MAX_LINE);
+    if (buf1 == NULL)
+        return;
+
+    int len = TtyReceive(tty_id, buf1, TERMINAL_MAX_LINE);
+    char *buf2 = malloc(len);
+    memcpy(buf2, buf1, len);
+    free(buf1);
+
+    ttybufread_qpush(tty_id, buf2, len);
+
+    //TODO: store return for TtyReceive in kernel stack?
+
+    if(term[tty_id].reading_head->proc == NULL) {
+        ready_qpush(ttyread_qpop(tty_id));
+    	ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
+    }
 }
 
 void trap_tty_transmit_handler(ExceptionInfo *info) {
+
     TracePrintf(1, "Exception: TTY Transmit\n");
+    int tty_id = info -> code;
+
+    ready_qpush(ttywrite_qpop(tty_id));
+    ContextSwitch(MySwitchFunc, running_proc -> ctx, running_proc, ready_qpop());
 }
+
+
+
+
+
+
