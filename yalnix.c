@@ -221,6 +221,7 @@ delay_qpush(struct pcb *proc) {
     delay_tail = new_queue_elem;
     delay_tail->next = &dummy;
 
+    TracePrintf(1, "delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
     int next_proc_pid = -1;
 
 }
@@ -745,25 +746,40 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
 
+    TracePrintf(1, "CONTEXT SWITCH pid  %d to %d\n", pcb1->pid, pcb2->pid);
+    TracePrintf(1, "ctxp: %x\n", ctxp);
+
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
+
+    if (delay_head->proc != NULL)
+        TracePrintf(1, "1 - delay_head pid1: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
 
     if (pcb2->init == 0) {
         pcb2->init = 1;
         copyKernelStack(pcb2);
     }
 
+    if (delay_head->proc != NULL)
+        TracePrintf(1, "2 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
+
     r0_page_table = pcb2->r0_pointer;
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
     physaddr += (int)r0_page_table & PAGEOFFSET;
+    if (delay_head->proc != NULL)
+        TracePrintf(1, "3 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
 
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+    if (delay_head->proc != NULL)
+        TracePrintf(1, "4 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
 
     if (pcb1 -> pid != 0 && pcb1->queue) {
     	ready_qpush(pcb1);
     }
+    if (delay_head->proc != NULL)
+        TracePrintf(1, "5 - delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
 
     running_proc = pcb2;
     return pcb2->ctx;
@@ -832,6 +848,7 @@ MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "Cloning\n");
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
+    TracePrintf(1, "ctxp: %x\n", ctxp);
 
     pcb2->r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
 
@@ -845,22 +862,24 @@ MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
     memcpy(pcb2->info, pcb1->info, sizeof(ExceptionInfo));
 
     TracePrintf(1, "Returning from MyCloneFunc\n");
+    TracePrintf(1, "pcb2->ctx: %x\n", ctxp);
 
-    return &pcb2->ctx;
+    return pcb2->ctx;
 }
 
 int
 _Fork() {
     TracePrintf(1, "Forking\n");
-    struct pcb *child_proc = malloc(sizeof (struct pcb*));
+    struct pcb *child_proc = malloc(sizeof (struct pcb));
     child_proc->ctx = malloc(sizeof (SavedContext));
+    TracePrintf(1, "child proc ctx addr: %x\t end_of_delay addr: %x\t size: %x\n", child_proc->ctx, &child_proc->end_of_delay, sizeof(SavedContext));
     int new_pid = pid_counter;
     pid_counter ++;
     child_proc->queue = 0;
     child_proc->pid = new_pid;
     child_proc->init = 1;
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
-    ContextSwitch(MyCloneFunc, &child_proc->ctx, running_proc, child_proc);
+    ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, child_proc);
     if (running_proc->pid == new_pid){
@@ -868,6 +887,7 @@ _Fork() {
         return 0;
     } else {
         TracePrintf(1, "FORK RETURN PARENT\n");
+        TracePrintf(1, "delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
         return new_pid;
     }
 }
@@ -1016,6 +1036,9 @@ _Delay(int clock_ticks) {
     TracePrintf(1, "DELAY\n");
 
     running_proc->end_of_delay = time + clock_ticks;
+    TracePrintf(1, "time: %d, clock_ticks: %d\n", time, clock_ticks);
+    TracePrintf(1, "Pushing proc pid: %d to delay queue with end_of_delay: %d\n", running_proc->pid, running_proc->end_of_delay);
+    TracePrintf(1, "running_proc->end_of_delay addr: %x\n", &running_proc->end_of_delay);
     delay_qpush(running_proc);
     num_delay_procs ++;
     running_proc->queue = 0;
@@ -1076,12 +1099,15 @@ void trap_kernel_handler(ExceptionInfo *info) {
 void trap_clock_handler(ExceptionInfo *info) {
     time ++;
 
+    TracePrintf(1, "CLOCK time: %d\n", time);
+
     // LOOP THROUG DELAY QUEUE
     int procs_done_delaying = 0;
 
     for (_i=0; _i<num_delay_procs; _i++) {
         struct pcb *proc = delay_qpop();
-        TracePrintf(1, "Proc pid: %d popped from delay queue\n", proc->pid);
+        TracePrintf(1, "Proc pid: %d popped from delay queue at time: %d\tend of delay: %d\n", proc->pid, time, proc->end_of_delay);
+        TracePrintf(1, "proc->end_of_delay addr: %x\n", &proc->end_of_delay);
         if (time >= proc->end_of_delay) {
             TracePrintf(1, "Proc pid: %d done delaying\n", proc->pid);
             ready_qpush(proc);
@@ -1090,6 +1116,7 @@ void trap_clock_handler(ExceptionInfo *info) {
             delay_qpush(proc);
         }
     }
+
 
     if (time % 2 == 0) {
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
