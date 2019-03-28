@@ -33,6 +33,10 @@ struct pcb {
 
     int end_of_delay;
 
+    int num_children;
+
+    int waiting;
+
 
 };
 
@@ -346,7 +350,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     idle-> r0_pointer = r0_page_table;
     idle->queue = 0;
     idle->ctx = malloc(sizeof(SavedContext));
-    idle -> status_pointer = malloc(sizeof(struct queue_status));
 
 
     init = malloc(sizeof (struct pcb));
@@ -357,7 +360,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     memcpy(init->info, info, sizeof(ExceptionInfo));
     pid_counter++;
     init->ctx = malloc(sizeof(SavedContext));
-    init -> status_pointer = malloc(sizeof(struct queue_status));
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
     memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
     // TracePrintf(1, "malloc\n");
@@ -888,6 +890,7 @@ _Fork() {
         return 0;
     } else {
         TracePrintf(1, "FORK RETURN PARENT\n");
+        running_proc -> num_children ++;
         // TracePrintf(1, "delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
         return new_pid;
     }
@@ -909,28 +912,43 @@ _Exec(char *filename, char **argvec, ExceptionInfo *info) {
 
 void
 _Exit(int status) {
-    TracePrintf(1, "EXIT\n");
+    TracePrintf(1, "EXIT pid: %d\n", running_proc->pid);
 
     running_proc->exited = 1;
 
     if (running_proc->parent != NULL && running_proc->parent->exited != 1) {
+        TracePrintf(1, "Alerting parent of exit\n");
 
-        struct queue_status *update_status_elem = running_proc -> parent -> status_pointer;
+        struct queue_status *update_status_elem = running_proc->parent->status_pointer;
 
-        while (update_status_elem -> next != NULL) {
-            update_status_elem = update_status_elem -> next;
+        struct queue_status *new_status = malloc(sizeof(struct queue_status));
+        new_status-> pid = running_proc -> pid;
+        new_status -> status = status;
+
+        if (update_status_elem == NULL) {
+            running_proc->parent->status_pointer = new_status;
+        } else {
+
+            while (update_status_elem->next != NULL) {
+                update_status_elem = update_status_elem->next;
+            }
+
+            update_status_elem->next = new_status;
         }
 
-        update_status_elem -> next = malloc(sizeof(struct queue_status));
-        update_status_elem -> next -> pid = running_proc -> pid;
-        update_status_elem -> next -> status = status;
+        running_proc->parent->num_children --;
+
+        if (running_proc->parent->waiting) {
+            TracePrintf(1, "Parent waiting, pushing onto ready queue\n");
+            ready_qpush(running_proc->parent);
+        }
 
     }
 
     struct pcb *next_proc = ready_qpop();
     if (next_proc->pid == 0) {
 
-        if (delay_ticks > 0) {
+        if (num_delay_procs > 0) {
             ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
         }
         TracePrintf(1, "No more waiting procedures, halting");
@@ -985,27 +1003,35 @@ _Wait(int *status_ptr) {
 
     TracePrintf(1, "WAITING in pid: %d\n", running_proc->pid);
 
-    TracePrintf(1, "HERE1\n");
+    if (running_proc->status_pointer == NULL && running_proc->num_children != 0) {
+        TracePrintf(1, "Waiting queue empty, context switching\n");
+        // waiting queue empty, wait on children to finish
+        running_proc -> waiting = 1;
+        running_proc -> queue = 0;
+        ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
+    }
 
-	if (running_proc -> status_pointer == NULL) {
+    if (running_proc->status_pointer != NULL) {
+         // waiting queue not empty!
+        TracePrintf(1, "Waiting queue not empty!, reaping child\n");
+        TracePrintf(1, "HERE1\n");
+        int pid_child = running_proc->status_pointer->pid;
         TracePrintf(1, "HERE2\n");
-		ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
-	}
+        *(status_ptr)= running_proc->status_pointer->status;
+        TracePrintf(1, "HERE3\n");
+        running_proc -> status_pointer = running_proc->status_pointer->next;
 
-    TracePrintf(1, "HERE3\n");
+        running_proc -> waiting = 0;
+        running_proc -> queue = 1;
 
-	int pid_child = running_proc->status_pointer->pid;
-
-    TracePrintf(1, "HERE4\n");
-
-    *(status_ptr)= running_proc -> status_pointer -> status;
-
-    TracePrintf(1, "HERE5\n");
-    running_proc -> status_pointer = running_proc -> status_pointer -> next;
-
-    TracePrintf(1, "HERE6\n");
-
-    return pid_child;
+        TracePrintf(1, "Done waiting - reaped pid: %d with status: %d\n", pid_child, *status_ptr);
+        return pid_child;
+    } else if (running_proc->num_children == 0) {
+        TracePrintf(1, "No children, waiting queue empty, returning ERROR\n");
+        // No children
+       return ERROR;
+    }
+    return ERROR;
 }
 
 int
