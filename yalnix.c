@@ -153,13 +153,13 @@ ready_qpop() {
     	return idle;
     }
 
-    TracePrintf(1, "QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
+    TracePrintf(1, "READY QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
     return proc;
 }
 
 void
 ready_qpush(struct pcb *proc) {
-	TracePrintf(1, "QPUSH pid: %d\n", proc -> pid);
+	TracePrintf(1, "READY QPUSH pid: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
     new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
@@ -198,13 +198,13 @@ delay_qpop() {
         return idle;
     }
 
-    TracePrintf(1, "QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
+    TracePrintf(1, "DELAY QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
     return proc;
 }
 
 void
 delay_qpush(struct pcb *proc) {
-    TracePrintf(1, "QPUSH pid: %d\n", proc -> pid);
+    TracePrintf(1, "DELAY QPUSH pid: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
     new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
@@ -1016,13 +1016,9 @@ _Delay(int clock_ticks) {
     TracePrintf(1, "DELAY\n");
 
     running_proc->end_of_delay = time + clock_ticks;
-    TracePrintf(1, "HERE1\n");
     delay_qpush(running_proc);
-    TracePrintf(1, "HERE2\n");
     num_delay_procs ++;
-    TracePrintf(1, "HERE3\n");
     running_proc->queue = 0;
-    TracePrintf(1, "HERE4\n");
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
     return 0;
 }
