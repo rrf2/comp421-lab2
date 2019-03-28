@@ -27,7 +27,7 @@ struct pcb {
     // unsigned int kstack_pfns[KERNEL_STACK_PAGES];
     struct queue_status *status_pointer;
     struct pcb *parent;
-    int delay;
+    int end_of_delay;
 
 };
 
@@ -46,6 +46,8 @@ struct queue_status {
 //  struct pte pte_entries[PAGE_TABLE_LEN];
 // };
 
+int time = 0;
+
 int virtual_memory;
 void *kernel_brk;
 
@@ -63,6 +65,8 @@ unsigned int pfnpop();
 void pfnpush(unsigned int pfn);
 struct pcb* ready_qpop();
 void ready_qpush(struct pcb *proc);
+struct pcb* delay_qpop();
+void delay_qpush(struct pcb *proc);
 int LoadProgram(char *name, char **args, ExceptionInfo *info);
 void trap_kernel_handler(ExceptionInfo *info);
 void trap_clock_handler(ExceptionInfo *info);
@@ -98,6 +102,10 @@ struct pcb *delay_proc;
 struct queue_elem dummy;
 struct queue_elem *ready_head = &dummy;
 struct queue_elem *ready_tail = &dummy;
+
+struct queue_elem *delay_head = &dummy;
+struct queue_elem *delay_tail = &dummy;
+int num_delay_procs = 0;
 
 struct queue_elem *waiting = &dummy;
 
@@ -171,6 +179,53 @@ ready_qpush(struct pcb *proc) {
     int next_proc_pid = -1;
 
 }
+
+struct pcb*
+delay_qpop() {
+    struct pcb *proc = delay_head->proc;
+    int head_proc_pid = -1;
+    if (proc != NULL) {
+
+        delay_head = delay_head->next;
+
+        if (delay_head->proc != NULL) {
+            head_proc_pid = delay_head->proc->pid;
+        }
+    }
+    if (proc == NULL) {
+        // TracePrintf(1, "proc is null\n");
+        delay_tail = &dummy;
+        return idle;
+    }
+
+    TracePrintf(1, "QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
+    return proc;
+}
+
+void
+delay_qpush(struct pcb *proc) {
+    TracePrintf(1, "QPUSH pid: %d\n", proc -> pid);
+    struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
+    new_queue_elem -> proc = malloc(sizeof(struct pcb));
+    new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
+
+    new_queue_elem -> proc = proc;
+
+    if (delay_head -> proc == NULL) {
+        delay_head = new_queue_elem;
+        delay_head->next = delay_tail;
+    } else {
+        delay_tail -> next = new_queue_elem;
+    }
+
+    delay_tail = new_queue_elem;
+    delay_tail->next = &dummy;
+
+    int next_proc_pid = -1;
+
+}
+
+
 
 void
 KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args) {
@@ -955,17 +1010,19 @@ _Delay(int clock_ticks) {
     if (clock_ticks == 0) {
     	return 0;
     }
-
     if (clock_ticks < 0) {
     	return ERROR;
     }
     TracePrintf(1, "DELAY\n");
-    delay_ticks = clock_ticks;
-    delay_proc = running_proc;
-    // TracePrintf(1, "idle addr: %x\n", idle);
-    TracePrintf(1, "setting delay->proc to pid: %d\n", running_proc->pid);
+
+    running_proc->end_of_delay = time + clock_ticks;
+    TracePrintf(1, "HERE1\n");
+    delay_qpush(running_proc);
+    TracePrintf(1, "HERE2\n");
+    num_delay_procs ++;
+    TracePrintf(1, "HERE3\n");
     running_proc->queue = 0;
-    // qpush(running_proc);
+    TracePrintf(1, "HERE4\n");
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
     return 0;
 }
@@ -1021,15 +1078,28 @@ void trap_kernel_handler(ExceptionInfo *info) {
 }
 
 void trap_clock_handler(ExceptionInfo *info) {
-    delay_ticks --;
-    if (delay_ticks == 0) {
-        TracePrintf(1, "End of delaying, switching back to pid: %d\n", delay_proc->pid);
-        // struct pcb *next_proc = qpop();
-        // TracePrintf(1, "Next Proc addr: %x\n", next_proc);
-        // TracePrintf(1, "Next Proc pid: %d\n", next_proc->pid);
-        delay_proc->queue = 1;
-        ContextSwitch(MySwitchFunc, idle->ctx, idle, delay_proc);
+    time ++;
+
+    // LOOP THROUG DELAY QUEUE
+    int procs_done_delaying = 0;
+
+    for (_i=0; _i<num_delay_procs; _i++) {
+        struct pcb *proc = delay_qpop();
+        TracePrintf(1, "Proc pid: %d popped from delay queue\n", proc->pid);
+        if (time >= proc->end_of_delay) {
+            TracePrintf(1, "Proc pid: %d done delaying\n", proc->pid);
+            ready_qpush(proc);
+            procs_done_delaying ++;
+        } else {
+            delay_qpush(proc);
+        }
     }
+
+    if (time % 2 == 0) {
+        ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
+    }
+
+    num_delay_procs -= procs_done_delaying;
     TracePrintf(1, "Exception: Clock\n");
 }
 
