@@ -120,6 +120,12 @@ struct queue_elem *waiting = &dummy;
 
 struct queue_status dummy2;
 
+struct queue_elem *ttyread_head[NUM_TERMINALS];
+struct queue_elem *ttyread_tail[NUM_TERMINALS];
+
+struct queue_elem *ttywrite_head[NUM_TERMINALS];
+struct queue_elem *ttywrite_tail[NUM_TERMINALS];
+
 unsigned int
 pfnpop() {
     unsigned int pfn = free_pfn_head->pfn;
@@ -235,6 +241,96 @@ delay_qpush(struct pcb *proc) {
 
 }
 
+struct pcb*
+ttyread_qpop(int tty_id) {
+    struct pcb *proc = ttyread_head[tty_id]->proc;
+    int head_proc_pid = -1;
+    if (proc != NULL) {
+
+        ttyread_head[tty_id] = ttyread_head[tty_id]->next;
+
+        if (ttyread_head[tty_id]->proc != NULL) {
+            head_proc_pid = ttyread_head[tty_id]->proc->pid;
+        }
+    }
+    if (proc == NULL) {
+        // TracePrintf(1, "proc is null\n");
+        ttyread_tail[tty_id] = &dummy;
+        return idle;
+    }
+
+    TracePrintf(1, "TTYREAD QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
+    return proc;
+}
+
+void
+ttyread_qpush(int tty_id, struct pcb *proc) {
+    TracePrintf(1, "TTYREAD QPUSH pid: %d\n", proc -> pid);
+    struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
+    new_queue_elem -> proc = malloc(sizeof(struct pcb));
+    new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
+
+    new_queue_elem -> proc = proc;
+
+    if (ttyread_head[tty_id] -> proc == NULL) {
+        ttyread_head[tty_id] = new_queue_elem;
+        ttyread_head[tty_id]->next = ttyread_tail[tty_id];
+    } else {
+        ttyread_tail[tty_id] -> next = new_queue_elem;
+    }
+
+    ttyread_tail[tty_id] = new_queue_elem;
+    ttyread_tail[tty_id]->next = &dummy;
+
+    int next_proc_pid = -1;
+
+}
+
+struct pcb*
+ttywrite_qpop(int tty_id) {
+    struct pcb *proc = ttywrite_head[tty_id]->proc;
+    int head_proc_pid = -1;
+    if (proc != NULL) {
+
+        ttywrite_head[tty_id] = ttywrite_head[tty_id]->next;
+
+        if (ttywrite_head[tty_id]>proc != NULL) {
+            head_proc_pid = ttywrite_head[tty_id]->proc->pid;
+        }
+    }
+    if (proc == NULL) {
+        // TracePrintf(1, "proc is null\n");
+        ttywrite_tail[tty_id] = &dummy;
+        return idle;
+    }
+
+    TracePrintf(1, "TTYWRITE QPOP - popped pid %d\t new head pid: %d\n", proc->pid, head_proc_pid);
+    return proc;
+}
+
+void
+ttywrite_qpush(int tty_id, struct pcb *proc) {
+    TracePrintf(1, "TTYWRITE QPUSH pid: %d\n", proc -> pid);
+    struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
+    new_queue_elem -> proc = malloc(sizeof(struct pcb));
+    new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
+
+    new_queue_elem -> proc = proc;
+
+    if (ttywrite_head[tty_id] -> proc == NULL) {
+        ttywrite_head[tty_id] = new_queue_elem;
+        ttywrite_head[tty_id]->next = ttywrite_tail[tty_id];
+    } else {
+        ttywrite_tail[tty_id] -> next = new_queue_elem;
+    }
+
+    ttywrite_tail[tty_id] = new_queue_elem;
+    ttywrite_tail[tty_id]->next = &dummy;
+
+    int next_proc_pid = -1;
+
+}
+
 
 
 void
@@ -336,6 +432,13 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     // Add back MEM_INVALID_PAGES
     for (_i=0; _i<MEM_INVALID_PAGES; _i++) {
         pfnpush(_i);
+    }
+
+    for (_i=0; _i<NUM_TERMINALS; _i++) {
+        ttyread_head[_i] = &dummy;
+        ttyread_tail[_i] = &dummy;
+        ttywrite_head[_i] = &dummy;
+        ttywrite_tail[_i] = &dummy;
     }
 
 
@@ -1121,7 +1224,9 @@ _TtyRead(int tty_id, void *buf, int len) {
 
 int
 _TtyWrite(int tty_id, void *buf, int len) {
-    return -1;
+    char *charbuf = malloc(len);
+    memcpy(charbuf, buf, len);
+    TtyTransmit(tty_id, charbuf, len);
 }
 
 void trap_kernel_handler(ExceptionInfo *info) {
@@ -1156,7 +1261,7 @@ void trap_kernel_handler(ExceptionInfo *info) {
     }
 
     if (code_num == YALNIX_TTY_READ) {
-        info -> regs[0] = _TtyWrite((int) info -> regs[1], (void*) info -> regs[2], (int) info -> regs[3]);
+        info -> regs[0] = _TtyRead((int) info -> regs[1], (void*) info -> regs[2], (int) info -> regs[3]);
     }
 
     if (code_num == YALNIX_TTY_WRITE) {
