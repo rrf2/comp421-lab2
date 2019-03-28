@@ -160,15 +160,15 @@ ready_qpush(struct pcb *proc) {
 
     new_queue_elem -> proc = proc;
 
-    if (head -> proc == NULL) {
-    	head = new_queue_elem;
-        head->next = tail;
+    if (ready_head -> proc == NULL) {
+    	ready_head = new_queue_elem;
+        ready_head->next = ready_tail;
     } else {
-    	tail -> next = new_queue_elem;
+    	ready_tail -> next = new_queue_elem;
     }
 
-    tail = new_queue_elem;
-    tail->next = &dummy;
+    ready_tail = new_queue_elem;
+    ready_tail->next = &dummy;
 
     int next_proc_pid = -1;
 
@@ -176,7 +176,7 @@ ready_qpush(struct pcb *proc) {
 
 void
 KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **cmd_args) {
-	TracePrintf(1, "address of dummy %x, address of head %x\n", &dummy, head);
+	TracePrintf(1, "address of dummy %x, address of head %x\n", &dummy, ready_head);
     // KEEP TRACK OF THE KERNEL BRK and VIRTUAL MEMORY FLAG
     kernel_brk = orig_brk;
     virtual_memory = 0;
@@ -865,6 +865,7 @@ _Exit(int status) {
     //"orphaning" children in ready queue
     struct queue_elem *next_queue_elem;
     next_queue_elem = ready_head;
+
     while (next_queue_elem != NULL) {
     	if (next_queue_elem -> proc -> parent == running_proc) {
     		next_queue_elem -> proc -> parent == NULL;
