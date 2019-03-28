@@ -9,8 +9,8 @@ main(int argc, char **argv)
     int i;
 
     for (i = 0; i < argc; i++) {
-	fprintf(stderr, "argv[%d] = %p", i, argv[i]);
-	fprintf(stderr, " = '%s'\n", argv[i]);
+		fprintf(stderr, "argv[%d] = %p", i, argv[i]);
+		fprintf(stderr, " = '%s'\n", argv[i]);
     }
 
     Exec(argv[1], argv + 1);

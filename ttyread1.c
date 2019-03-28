@@ -18,6 +18,7 @@ main()
     fprintf(stderr, "line '");
     fwrite(line, len, 1, stderr);
     fprintf(stderr, "'\n");
+    fprintf(stderr, "DONE\n");
 
     Exit(0);
 }

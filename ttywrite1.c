@@ -11,6 +11,7 @@ int
 main()
 {
     TTY_WRITE_STR(0, "Hello world\n");
+    TTY_WRITE_STR(2, "Hello world\n");
 
     Exit(0);
 }

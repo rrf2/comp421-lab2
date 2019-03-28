@@ -363,7 +363,7 @@ ttywrite_qpop(int tty_id) {
 
 void
 ttybufread_qpush(int tty_id, char *buf, int len) {
-    TracePrintf(1, "TTYREAD QPUSH\n");
+    TracePrintf(1, "TTYREADbuf QPUSH\n");
     struct buf_queue_elem *new_queue_elem = malloc(sizeof (struct buf_queue_elem*));
     new_queue_elem -> buf = buf;
     new_queue_elem -> len = len;
@@ -383,7 +383,7 @@ ttybufread_qpush(int tty_id, char *buf, int len) {
 
 void
 ttybufwrite_qpush(int tty_id, char *buf, int len) {
-    TracePrintf(1, "TTYREAD QPUSH\n");
+    TracePrintf(1, "TTYREADbuf QPUSH\n");
     struct buf_queue_elem *new_queue_elem = malloc(sizeof (struct buf_queue_elem*));
     new_queue_elem -> buf = buf;
     new_queue_elem -> len = len;
@@ -413,7 +413,7 @@ ttybufread_qpop(int tty_id) {
         return NULL;
     }
 
-    TracePrintf(1, "TTYREAD QPOP\n");
+    TracePrintf(1, "TTYREADbuf QPOP\n");
     return buf;
 }
 
@@ -429,7 +429,7 @@ ttybufwrite_qpop(int tty_id) {
         return NULL;
     }
 
-    TracePrintf(1, "TTYREAD QPOP\n");
+    TracePrintf(1, "TTYREADbuf QPOP\n");
     return buf;
 }
 
@@ -554,6 +554,8 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
         term[_i].reading_tail = &dummy;
         term[_i].writing_head = &dummy;
         term[_i].writing_tail = &dummy;
+
+
     }
 
 
@@ -1162,7 +1164,7 @@ _Exit(int status) {
 
     struct pcb *next_proc = ready_qpop();
     if (next_proc->pid == 0) {
-
+        TracePrintf(1, "Num delay procs: %d\n", num_delay_procs);
         if (num_delay_procs > 0) {
             ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
         }
@@ -1299,9 +1301,11 @@ _Delay(int clock_ticks) {
 
 int
 _TtyRead(int tty_id, void *buf, int len) {
+    TracePrintf(1, "TTY READ pid: %d\n", running_proc->pid);
     char *linebuf;
     if (term[tty_id].reading_buffer_head->buf == NULL) {
         ttyread_qpush(tty_id, running_proc);
+        running_proc->queue = 0;
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
         linebuf = ttybufread_qpop(tty_id);
     }
@@ -1314,6 +1318,7 @@ _TtyRead(int tty_id, void *buf, int len) {
 
 int
 _TtyWrite(int tty_id, void *buf, int len) {
+    TracePrintf(1, "TTY WRITE pid: %d\n", running_proc->pid);
     char *charbuf = malloc(len);
     memcpy(charbuf, buf, len);
 
@@ -1391,7 +1396,8 @@ void trap_clock_handler(ExceptionInfo *info) {
     }
 
 
-    if (time % 2 == 0) {
+    if (time % 2 == 0 && ready_head->proc != NULL) {
+        TracePrintf(1, "ROUND ROBIN SCHEDULING\n");
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
     }
 
@@ -1585,8 +1591,13 @@ void trap_tty_receive_handler(ExceptionInfo *info) {
     //TODO: store return for TtyReceive in kernel stack?
 
     if(term[tty_id].reading_head->proc == NULL) {
-        ready_qpush(ttyread_qpop(tty_id));
+        struct pcb *proc = ttyread_qpop(tty_id);
+        proc->queue = 1;
+        ready_qpush(proc);
     	ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
+    } else {
+        ready_qpush(ttyread_qpop(tty_id));
+        ContextSwitch(MySwitchFunc, running_proc -> ctx, running_proc, ready_qpop());
     }
 }
 
@@ -1594,9 +1605,12 @@ void trap_tty_transmit_handler(ExceptionInfo *info) {
 
     TracePrintf(1, "Exception: TTY Transmit\n");
     int tty_id = info -> code;
+    if (term[tty_id].writing_head->proc != NULL)
+    {
+        ready_qpush(ttywrite_qpop(tty_id));
+        ContextSwitch(MySwitchFunc, running_proc -> ctx, running_proc, ready_qpop());
+    }
 
-    ready_qpush(ttywrite_qpop(tty_id));
-    ContextSwitch(MySwitchFunc, running_proc -> ctx, running_proc, ready_qpop());
 }
 
 
