@@ -27,6 +27,7 @@ struct pcb {
     // unsigned int kstack_pfns[KERNEL_STACK_PAGES];
     struct queue_status *status_pointer;
     struct pcb *parent;
+    int delay;
 
 };
 
@@ -97,6 +98,7 @@ struct pcb *delay_proc;
 struct queue_elem dummy;
 struct queue_elem *head = &dummy;
 struct queue_elem *tail = &dummy;
+
 struct queue_elem *waiting = &dummy;
 
 struct queue_status dummy2;
@@ -155,7 +157,7 @@ qpush(struct pcb *proc) {
     new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
 
     new_queue_elem -> proc = proc;
-  
+
     if (head -> proc == NULL) {
     	// TracePrintf(1, "HERE7.1\n");
     	head = new_queue_elem;
@@ -164,12 +166,12 @@ qpush(struct pcb *proc) {
     } else {
     	tail -> next = new_queue_elem;
     }
-    
+
 
     // TracePrintf(1, "THIS IS NEW HEAD: %d\n", head -> proc -> pid);
     tail = new_queue_elem;
     tail->next = &dummy;
-   
+
 
     int next_proc_pid = -1;
 
@@ -700,10 +702,6 @@ SavedContext*
 MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
-    TracePrintf(1, "Context Switching pid: %d to pid: %d\n", pcb1->pid, pcb2->pid);
-    TracePrintf(1, "init->r0_pointer[508].pfn: %d\n", init->r0_pointer[508].pfn);
-    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
-    TracePrintf(1, "ctxp: %x\n", ctxp);
 
 
     // Save current r0 page table to PCB1
@@ -722,17 +720,10 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
 
     if (pcb1 -> pid != 0 && pcb1->queue) {
-    	TracePrintf(1, "HERE6.1\n");
     	qpush(pcb1);
-
-    	TracePrintf(1, "HERE6.3\n");
     }
 
     running_proc = pcb2;
-    TracePrintf(1, "init->r0_pointer[508].pfn: %d\n", init->r0_pointer[508].pfn);
-    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
-    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
-    TracePrintf(1, "&running_proc->ctx: %x\n", &running_proc->ctx);
     return pcb2->ctx;
 }
 
@@ -829,9 +820,6 @@ _Fork() {
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
     ContextSwitch(MyCloneFunc, &child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
-    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
-    TracePrintf(1, "init->r0_pointer[508].pfn: %d\n", init->r0_pointer[508].pfn);
-    TracePrintf(1, "&running_proc->ctx: %x\n", &running_proc->ctx);
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, child_proc);
     if (running_proc->pid == new_pid){
         TracePrintf(1, "FORK RETURN CHILD\n");
@@ -861,6 +849,10 @@ _Exit(int status) {
     TracePrintf(1, "EXIT\n");
     struct pcb *next_proc = qpop();
     if (next_proc->pid == 0) {
+
+        if (delay_ticks > 0) {
+            ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
+        }
         TracePrintf(1, "No more waiting procedures, halting");
         Halt();
     }
@@ -912,8 +904,8 @@ _Wait(int *status_ptr) {
 	int pid_child = running_proc -> status_pointer -> proc -> pid;
 
     *(status_ptr)= running_proc -> status_pointer -> status;
-    running_proc -> status_pointer = running_proc -> status_pointer -> next; 
- 
+    running_proc -> status_pointer = running_proc -> status_pointer -> next;
+
     return pid_child;
 }
 
@@ -950,7 +942,6 @@ _Brk(void *addr) {
             running_proc->brk = VMEM_0_BASE + ((vpn + 1) * PAGESIZE);
             num_free_pfn --;
             WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-            // TracePrintf(1, "HERE10\n");
         }
     } else {
         TracePrintf(1, "Deallocating\n");
@@ -985,7 +976,7 @@ _Delay(int clock_ticks) {
     delay_ticks = clock_ticks;
     delay_proc = running_proc;
     // TracePrintf(1, "idle addr: %x\n", idle);
-    TracePrintf(1, "running_proc addr: %x\n", running_proc);
+    TracePrintf(1, "setting delay->proc to pid: %d\n", running_proc->pid);
     running_proc->queue = 0;
     // qpush(running_proc);
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, qpop());
@@ -1045,7 +1036,7 @@ void trap_kernel_handler(ExceptionInfo *info) {
 void trap_clock_handler(ExceptionInfo *info) {
     delay_ticks --;
     if (delay_ticks == 0) {
-        TracePrintf(1, "End of delaying, switching back\n");
+        TracePrintf(1, "End of delaying, switching back to pid: %d\n", delay_proc->pid);
         // struct pcb *next_proc = qpop();
         // TracePrintf(1, "Next Proc addr: %x\n", next_proc);
         // TracePrintf(1, "Next Proc pid: %d\n", next_proc->pid);

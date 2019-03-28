@@ -14,7 +14,6 @@ main(int argc, char **argv)
     printf("BrK(%x)\n", VMEM_0_BASE + PAGE_TABLE_LEN * PAGESIZE / 4);
     Brk((void *) (VMEM_0_BASE + PAGE_TABLE_LEN * PAGESIZE / 4));
     char **argvec = malloc(sizeof(char*));
-    Exec("initbasic", argvec);
     printf("Done with initbasic\n");
     Exit(0);
 }
