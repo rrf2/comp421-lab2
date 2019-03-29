@@ -8,6 +8,8 @@
 
 main(int argc, char **argv)
 {
+	printf("SHELL\n");
+	TracePrintf(1, "SHELL\n");
     char buf[TERMINAL_MAX_LINE];
     char *cmd_argv[TERMINAL_MAX_LINE];  /* An overkill for expediency */
     char *prompt = "yalnix> ";

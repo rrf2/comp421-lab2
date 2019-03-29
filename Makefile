@@ -25,9 +25,13 @@
 #	For example, the Makefile will make test1 out of test1.c,
 #	if you have a file named test1.c in this directory.
 #
+<<<<<<< HEAD
 
 ALL = yalnix bigstack blowstack brktest console delaytest exectest forktest0 forktest1 forktest1b forktest2 forktest2b forktest3 forkwait0c forkwait0p forkwait1 forkwait1b forkwait1c forkwait1d idle init init_ init1 init2 init3 initbasic shell trapillegal trapmath trapmemory ttyread1 ttywrite1 ttywrite2 ttywrite3 waittest waittest1
 
+=======
+ALL = yalnix init idle initbasic delaytest forktest0 forktest1 forktest1b forktest2 forktest2b forktest3 init_ waittest exectest delaytest brktest ttyread1 forkwait0c forkwait0p forkwait1 forkwait1b forkwait1c forkwait1d ttyread1 ttywrite1 ttywrite2 init console shell ttywrite3 bigstack blowstack
+>>>>>>> e30d1e1cad1c250db6cff4da2c6e7c8cc03a99e9
 
 #
 #	You must modify the KERNEL_OBJS and KERNEL_SRCS definitions
