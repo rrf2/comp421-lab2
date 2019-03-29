@@ -599,7 +599,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     	errorFunc();
     }
 
-    init->sp = info->sp;
+    init->sp = (int)(uintptr_t)info->sp;
     TracePrintf(1, "Init sp: %x\n", init->sp);
     memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
 
@@ -1567,7 +1567,7 @@ void trap_memory_handler(ExceptionInfo *info) {
     if (info -> code == TRAP_MEMORY_MAPERR) {
         // printf("%s%p\n", "No mapping at addr: ", info->addr);
         // TracePrintf(1, "addr: %x,\tpc: %x\tsp: %x\t\n", info->addr, info->pc, info->sp);
-        int vpn = (int)info->sp / PAGESIZE;
+        int vpn = (int)(uintptr_t)info->sp / PAGESIZE;
         r0_page_table[vpn].valid = 1;
         r0_page_table[vpn].kprot = PROT_WRITE | PROT_READ;
         r0_page_table[vpn].uprot = PROT_WRITE | PROT_READ;
