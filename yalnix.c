@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 
 struct pfn_list_entry {
@@ -89,6 +90,7 @@ void trap_tty_receive_handler(ExceptionInfo *info);
 void trap_tty_transmit_handler(ExceptionInfo *info);
 int SetKernelBrk(void *addr);
 void copyKernelStack(struct pcb* proc);
+int errorFunc();
 SavedContext *MySwitchFunc(SavedContext *ctxp, void *p1, void *p2);
 SavedContext *MyCFunc(SavedContext *ctxp, void *p1, void *p2);
 
@@ -121,14 +123,6 @@ int num_delay_procs = 0;
 
 struct buf_queue_elem buf_dummy;
 
-// <<<<<<< HEAD
-// struct queue_elem *ttyread_head[NUM_TERMINALS];
-// struct queue_elem *ttyread_tail[NUM_TERMINALS];
-
-// struct queue_elem *ttywrite_head[NUM_TERMINALS];
-// struct queue_elem *ttywrite_tail[NUM_TERMINALS];
-// =======
-
 struct terminal {
 	struct buf_queue_elem *writing_buffer_head;
     struct buf_queue_elem *writing_buffer_tail;
@@ -142,14 +136,12 @@ struct terminal {
 };
 
 struct terminal term[NUM_TERMINALS];
-// >>>>>>> f8e19e656f60ed3ae20959810be8db3c1ce4aba4
 
 unsigned int
 pfnpop() {
     unsigned int pfn = free_pfn_head->pfn;
     free_pfn_head = free_pfn_head->next;
     num_free_pfn --;
-    // TracePrintf(1, "PFNPOP - old: %d\t new: %d\t\n", pfn, free_pfn_head->pfn);
     return pfn;
 }
 
@@ -157,6 +149,9 @@ void
 pfnpush(unsigned int pfn) {
     // TracePrintf(1, "PUSH: %d\n", pfn);
     struct pfn_list_entry *new_pfn_entry = malloc(sizeof (struct pfn_list_entry*));
+    if (new_pfn_entry == NULL) {
+    	errorFunc();
+    }
     new_pfn_entry->pfn = pfn;
     new_pfn_entry->next = free_pfn_head;
     free_pfn_head = new_pfn_entry;
@@ -194,8 +189,13 @@ void
 ready_qpush(struct pcb *proc) {
 	TracePrintf(1, "READY QPUSH pid: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
+    if (new_queue_elem == NULL) {
+    	errorFunc();
+    }
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
-    new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
+    if (new_queue_elem -> proc == NULL) {
+    	errorFunc();
+    }
 
     new_queue_elem -> proc = proc;
 
@@ -208,8 +208,6 @@ ready_qpush(struct pcb *proc) {
 
     ready_tail = new_queue_elem;
     ready_tail->next = &dummy;
-
-    int next_proc_pid = -1;
 
 }
 
@@ -239,8 +237,13 @@ void
 delay_qpush(struct pcb *proc) {
     TracePrintf(1, "DELAY QPUSH pid: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
+    if (new_queue_elem == NULL) {
+    	errorFunc();
+    }
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
-    new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
+    if (new_queue_elem -> proc == NULL) {
+    	errorFunc();
+    } 
 
     new_queue_elem -> proc = proc;
 
@@ -255,7 +258,6 @@ delay_qpush(struct pcb *proc) {
     delay_tail->next = &dummy;
 
     TracePrintf(1, "delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
-    int next_proc_pid = -1;
 }
 
 
@@ -263,8 +265,13 @@ void
 ttyread_qpush(int tty_id, struct pcb *proc) {
     TracePrintf(1, "TTYREAD QPUSH pid: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
+    if (new_queue_elem == NULL) {
+    	errorFunc();
+    }
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
-    new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
+    if (new_queue_elem == NULL) {
+    	errorFunc();
+    }
 
     new_queue_elem -> proc = proc;
 
@@ -278,15 +285,19 @@ ttyread_qpush(int tty_id, struct pcb *proc) {
     term[tty_id].reading_tail = new_queue_elem;
     term[tty_id].reading_tail->next = &dummy;
 
-    int next_proc_pid = -1;
 }
 
 void
 ttywrite_qpush(int tty_id, struct pcb *proc) {
     TracePrintf(1, "TTYWRITE QPUSH pid: %d\n", proc -> pid);
     struct queue_elem *new_queue_elem = malloc(sizeof (struct queue_elem*));
+    if (new_queue_elem == NULL) {
+    	errorFunc();
+    }
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
-    new_queue_elem -> proc = malloc(sizeof(struct queue_elem));
+    if(new_queue_elem -> proc == NULL) {
+    	errorFunc();
+    }
 
     new_queue_elem -> proc = proc;
 
@@ -300,7 +311,6 @@ ttywrite_qpush(int tty_id, struct pcb *proc) {
     term[tty_id].writing_tail = new_queue_elem;
     term[tty_id].writing_tail->next = &dummy;
 
-    int next_proc_pid = -1;
 }
 
 struct pcb*
@@ -348,23 +358,13 @@ ttywrite_qpop(int tty_id) {
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 void
 ttybufread_qpush(int tty_id, char *buf, int len) {
     TracePrintf(1, "TTYREADbuf QPUSH\n");
     struct buf_queue_elem *new_queue_elem = malloc(sizeof (struct buf_queue_elem*));
+    if (new_queue_elem == NULL) {
+    	errorFunc();
+    }
     new_queue_elem -> buf = buf;
     new_queue_elem -> len = len;
 
@@ -377,14 +377,15 @@ ttybufread_qpush(int tty_id, char *buf, int len) {
 
     term[tty_id].reading_buffer_tail = new_queue_elem;
     term[tty_id].reading_buffer_tail->next = &buf_dummy;
-
-    int next_proc_pid = -1;
 }
 
 void
 ttybufwrite_qpush(int tty_id, char *buf, int len) {
     TracePrintf(1, "TTYREADbuf QPUSH\n");
     struct buf_queue_elem *new_queue_elem = malloc(sizeof (struct buf_queue_elem*));
+	if (new_queue_elem == NULL) {
+    	errorFunc();
+    }
     new_queue_elem -> buf = buf;
     new_queue_elem -> len = len;
 
@@ -397,11 +398,9 @@ ttybufwrite_qpush(int tty_id, char *buf, int len) {
 
     term[tty_id].writing_buffer_tail = new_queue_elem;
     term[tty_id].writing_buffer_tail->next = &buf_dummy;
-
-    int next_proc_pid = -1;
 }
 
-struct pcb*
+char*
 ttybufread_qpop(int tty_id) {
     char *buf = term[tty_id].reading_buffer_head->buf;
     if (buf != NULL) {
@@ -417,7 +416,7 @@ ttybufread_qpop(int tty_id) {
     return buf;
 }
 
-struct pcb*
+char*
 ttybufwrite_qpop(int tty_id) {
     char *buf = term[tty_id].writing_buffer_head->buf;
     if (buf != NULL) {
@@ -432,13 +431,6 @@ ttybufwrite_qpop(int tty_id) {
     TracePrintf(1, "TTYREADbuf QPOP\n");
     return buf;
 }
-
-
-
-
-
-
-
 
 
 
@@ -474,6 +466,9 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
     // CREATE THE HEAD OF THE FREE LIST
     free_pfn_head = malloc(sizeof (struct pfn_list_entry*));
+    if (free_pfn_head == NULL) {
+    	errorFunc();
+    }
     free_pfn_head->pfn = 0;
     // free_pfn_head.next = NULL;
 
@@ -482,7 +477,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     TracePrintf(1, "r0_page_table addr: %x\n", r0_page_table);
     TracePrintf(1, "initial_r0_page_table addr: %x\n", &initial_r0_page_table);
     TracePrintf(1, "r1_page_table addr: %x\n", r1_page_table);
-    TracePrintf(1, "pmemsize: %d\n", pmem_size);
+    TracePrintf(1, "pmemsize: %x\n", pmem_size);
     TracePrintf(1, "PAGE_TABLE_LEN: %d\n", PAGE_TABLE_LEN);
 
     // CREATE THE FREE LIST AND INITIALIZE REGION 1 PAGE TABLE
@@ -560,33 +555,49 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
 
 
     idle = malloc(sizeof (struct pcb));
+    if (idle == NULL) {
+    	errorFunc();
+    }
     idle -> pid = pid_counter;
     idle -> info = malloc(sizeof(ExceptionInfo));
+
+    if (idle -> info == NULL) {
+    	errorFunc();
+    }
     memcpy(idle->info, info, sizeof(ExceptionInfo));
     pid_counter++;
     idle-> r0_pointer = r0_page_table;
     idle->queue = 0;
     idle->ctx = malloc(sizeof(SavedContext));
+    if (idle -> ctx == NULL) {
+    	errorFunc();
+    }
 
 
     init = malloc(sizeof (struct pcb));
+    if (init == NULL) {
+    	errorFunc();
+    }
     init -> pid = pid_counter;
     init -> init = 0;
     init->queue = 1;
     init -> info = malloc(sizeof(ExceptionInfo));
+    if (init -> info == NULL) {
+    	errorFunc();
+    }
     memcpy(init->info, info, sizeof(ExceptionInfo));
     pid_counter++;
     init->ctx = malloc(sizeof(SavedContext));
+    if (init -> ctx == NULL) {
+    	errorFunc();
+    }
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    if (init -> r0_pointer == NULL) {
+    	errorFunc();
+    }
     memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
-    // TracePrintf(1, "malloc\n");
-
-    // TracePrintf(1, "&init->ctx:%x\tinit->r0_pointer:%x\n", &init->ctx, init->r0_pointer);
-    // init->kstack_pfns = malloc(KERNEL_STACK_PAGES * sizeof(unsigned int));
-    // memcpy(init->r0_pointer, r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte)); - removed 3/25
 
     running_proc = idle;
-
 
     ContextSwitch(MySwitchFunc, idle->ctx, idle, idle);
     TracePrintf(1, "Switched idle-idle\n");
@@ -687,6 +698,10 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
      *  we are about to delete all of Region 0.
      */
     cp = argbuf = (char *) malloc(size);
+
+    if (cp == NULL) {
+    	return ERROR;
+    }
     for (i = 0; args[i] != NULL; i++) {
         strcpy(cp, args[i]);
         cp += strlen(cp) + 1;
@@ -957,7 +972,7 @@ SetKernelBrk(void *addr) {
             r1_page_table[vpn].pfn = pfn;
             r1_page_table[vpn].uprot = PROT_NONE;
             r1_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
-            kernel_brk = VMEM_1_BASE + ((vpn + 1) * PAGESIZE);
+            kernel_brk =  (void *)(uintptr_t)(VMEM_1_BASE + ((vpn + 1) * PAGESIZE));
             num_free_pfn --;
         }
     }
@@ -974,7 +989,8 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     TracePrintf(1, "CONTEXT SWITCH pid  %d to %d\n", pcb1->pid, pcb2->pid);
     TracePrintf(1, "ctxp: %x\n", ctxp);
-
+    TracePrintf(1, "pcb1->r0_pointer[508].pfn: %d\n", pcb1->r0_pointer[508].pfn);
+    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -985,11 +1001,22 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
         copyKernelStack(pcb2);
     }
 
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
+    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
+
     r0_page_table = pcb2->r0_pointer;
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
-    physaddr += (int)r0_page_table & PAGEOFFSET;
+    TracePrintf(1, "r0_page_table: %x\n", r0_page_table);
+    TracePrintf(1, "DOWN_TO_PAGE(r0_page_table): %x\n", DOWN_TO_PAGE(r0_page_table));
+    TracePrintf(1, "DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN: %d\n", DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
+    TracePrintf(1, "r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn: %d\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
+    TracePrintf(1, "physaddr: %x\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE);
+    physaddr += (int)(uintptr_t)r0_page_table & PAGEOFFSET;
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
+    TracePrintf(1, "r0_page_table[508].valid: %d\n", r0_page_table[508].valid);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
     if (pcb1 -> pid != 0 && pcb1->queue) {
     	ready_qpush(pcb1);
     }
@@ -1019,7 +1046,7 @@ copyKernelStack(struct pcb *proc) {
         r0_page_table[vpn].pfn = pfn;
         proc->r0_pointer[PAGE_TABLE_LEN - KERNEL_STACK_PAGES + _i].pfn = pfn;
         TracePrintf(1, "Copying to vpn: %d\t addr: %x\t from vpn: %d\t w/ pfn:%d\n", vpn, vpn * PAGESIZE, KERNEL_STACK_BASE / PAGESIZE + _i, pfn);
-        memcpy(vpn * PAGESIZE, KERNEL_STACK_BASE + (_i * PAGESIZE), PAGESIZE);
+        memcpy((void*)(uintptr_t)(vpn * PAGESIZE), (void*)(uintptr_t)KERNEL_STACK_BASE + (_i * PAGESIZE), PAGESIZE);
         WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
     }
     // TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
@@ -1048,7 +1075,7 @@ copyRegion0(struct pcb *proc) {
             memcpy(&proc->r0_pointer[_i], &r0_page_table[_i], sizeof(struct pte));
             proc->r0_pointer[_i].pfn = pfn;
             TracePrintf(1, "Copying vpn:%d\t with vpn:%d\t and addr:%x\t from vpn:%d\t to pfn:%d\n", _i, vpn, vpn * PAGESIZE, _i, pfn);
-            memcpy(vpn * PAGESIZE, _i * PAGESIZE, PAGESIZE);
+            memcpy((void*)(uintptr_t)(vpn * PAGESIZE), (void*)(uintptr_t)(_i * PAGESIZE), PAGESIZE);
             WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
         }
     }
@@ -1061,19 +1088,29 @@ copyRegion0(struct pcb *proc) {
 
 SavedContext*
 MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
-    TracePrintf(1, "Cloning\n");
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
+    TracePrintf(1, "CLONGING pid: %d\n", pcb2->pid);
     TracePrintf(1, "ctxp: %x\n", ctxp);
 
-    pcb2->r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
-
-    // memcpy(pcb2->r0_pointer, pcb1->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+    TracePrintf(1, "kernel_brk: %x\n", kernel_brk);
+    int vpn = (unsigned long) kernel_brk / PAGESIZE - PAGE_TABLE_LEN;
+    r1_page_table[vpn].valid = 1;
+    r1_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
+    r1_page_table[vpn].pfn = pfnpop();
+    pcb2->r0_pointer = kernel_brk;
+    kernel_brk += PAGESIZE;
+    TracePrintf(1, "Set r0_pointer to vpn: %d, new kernel_brk: %x with pfn: %d\n", vpn, kernel_brk, r1_page_table[vpn].pfn);
+    TracePrintf(1, "vpn - 1, valid: %d, %d\n", vpn - 1, r1_page_table[vpn - 1].valid);
+    WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
     copyRegion0(pcb2);
     TracePrintf(1, "Finished copying kernel stack\n");
 
     pcb2->info = malloc(sizeof (ExceptionInfo));
+    if (pcb2 -> info == NULL) {
+    	errorFunc();
+    }
     TracePrintf(1, "Malloced info\n");
     memcpy(pcb2->info, pcb1->info, sizeof(ExceptionInfo));
 
@@ -1087,7 +1124,14 @@ int
 _Fork() {
     TracePrintf(1, "Forking\n");
     struct pcb *child_proc = malloc(sizeof (struct pcb));
+
+    if (child_proc == NULL) {
+    	return ERROR;
+    }
     child_proc->ctx = malloc(sizeof (SavedContext));
+    if(child_proc -> ctx == NULL) {
+    	return ERROR;
+    }
     TracePrintf(1, "child proc ctx addr: %x\t end_of_delay addr: %x\t size: %x\n", child_proc->ctx, &child_proc->end_of_delay, sizeof(SavedContext));
     int new_pid = pid_counter;
     pid_counter ++;
@@ -1099,6 +1143,7 @@ _Fork() {
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
     ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
+    TracePrintf(1, "child_proc->r0_pointer[508].pfn: %d\n", child_proc->r0_pointer[508].pfn);
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "SWITCHED\n");
     // TracePrintf(1, "CURRENT READY QUEUE: %d\n", ready_head->proc->pid);
@@ -1139,6 +1184,9 @@ _Exit(int status) {
         struct queue_status *update_status_elem = running_proc->parent->status_pointer;
 
         struct queue_status *new_status = malloc(sizeof(struct queue_status));
+        if (new_status == NULL) {
+        	errorFunc();
+        }
         new_status-> pid = running_proc -> pid;
         new_status -> status = status;
 
@@ -1320,6 +1368,9 @@ int
 _TtyWrite(int tty_id, void *buf, int len) {
     TracePrintf(1, "TTY WRITE pid: %d\n", running_proc->pid);
     char *charbuf = malloc(len);
+    if (charbuf == NULL) {
+    	return ERROR;
+    }
     memcpy(charbuf, buf, len);
 
     if (term[tty_id].writing_head->proc == NULL) {
@@ -1397,12 +1448,12 @@ void trap_clock_handler(ExceptionInfo *info) {
 
 	num_delay_procs -= procs_done_delaying;
 
+
     if (time % 2 == 0 && ready_head->proc != NULL) {
         TracePrintf(1, "ROUND ROBIN SCHEDULING\n");
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
     }
 
-    
     TracePrintf(1, "Exception: Clock\n");
 }
 
@@ -1605,11 +1656,15 @@ void trap_tty_receive_handler(ExceptionInfo *info) {
 
     int tty_id = info->code;
     char *buf1 = malloc(TERMINAL_MAX_LINE);
-    if (buf1 == NULL)
-        return;
-
+    if (buf1 == NULL) {
+    	errorFunc();
+    }
+       
     int len = TtyReceive(tty_id, buf1, TERMINAL_MAX_LINE);
     char *buf2 = malloc(len);
+    if (buf2 == NULL) {
+    	errorFunc();
+    }
     memcpy(buf2, buf1, len);
     free(buf1);
 
@@ -1640,6 +1695,9 @@ void trap_tty_transmit_handler(ExceptionInfo *info) {
 
 }
 
+int errorFunc(){
+	return ERROR;
+}
 
 
 
