@@ -67,32 +67,32 @@ main(int argc, char **argv)
     printf("Here1\n");
 
     while (1) {
-	pid = Wait(&status);
-	if (pid == pids[TTY_CONSOLE]) {
-	    TtyPrintf(TTY_CONSOLE, "Halting Yalnix\n");
-	    /*
-	     *  Halt should normally be a privileged instruction (and
-	     *  thus not usable from user mode), but the hardware
-	     *  has been set up to allow it for this project so that
-	     *  we can shut down Yalnix simply here.
-	     */
-	    Halt();
-	}
+		pid = Wait(&status);
+		if (pid == pids[TTY_CONSOLE]) {
+		    TtyPrintf(TTY_CONSOLE, "Halting Yalnix\n");
+		    /*
+		     *  Halt should normally be a privileged instruction (and
+		     *  thus not usable from user mode), but the hardware
+		     *  has been set up to allow it for this project so that
+		     *  we can shut down Yalnix simply here.
+		     */
+		    Halt();
+		}
 
-	printf("Here2\n");
+		printf("Here2\n");
 
-	for (i = 1; i < NUM_TERMINALS; i++) {
-	    if (pid == pids[i]) break;
-	}
+		for (i = 1; i < NUM_TERMINALS; i++) {
+		    if (pid == pids[i]) break;
+		}
 
-	printf("Here3\n");
+		printf("Here3\n");
 
-	if (i < NUM_TERMINALS) {
-	    TtyPrintf(TTY_CONSOLE, "Pid %d exited on terminal %d.\n", pid, i);
-	    pids[i] = StartTerminal(i);
-	}
-	else {
-	    TtyPrintf(TTY_CONSOLE, "Mystery pid %d returned from Wait!\n", pid);
-	}
+		if (i < NUM_TERMINALS) {
+		    TtyPrintf(TTY_CONSOLE, "Pid %d exited on terminal %d.\n", pid, i);
+		    pids[i] = StartTerminal(i);
+		}
+		else {
+		    TtyPrintf(TTY_CONSOLE, "Mystery pid %d returned from Wait!\n", pid);
+		}
     }
 }

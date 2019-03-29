@@ -475,7 +475,7 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     // free_pfn_head.next = NULL;
 
     //INITIALIZE Region 1 PAGE TABLE
-    r0_page_table = &initial_r0_page_table;
+    r0_page_table = initial_r0_page_table;
     TracePrintf(1, "r0_page_table addr: %x\n", r0_page_table);
     TracePrintf(1, "initial_r0_page_table addr: %x\n", &initial_r0_page_table);
     TracePrintf(1, "r1_page_table addr: %x\n", r1_page_table);
@@ -488,10 +488,9 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
             // num_free_pfn ++;
             // list_entry.pfn = _i;
             // list_entry.next = &free_pfn_head;
-            // free_pfn_head = list_entry;
+            
             pfnpush(_i);
         } else {
-            // TracePrintf(1, "PTE %d\n", _i);
             entry.pfn = _i;
             entry.valid = 1;
             if (_i < UP_TO_PAGE(&_etext) / PAGESIZE) {
@@ -609,8 +608,6 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     TracePrintf(1, "Switched idle-idle\n");
     LoadProgram("idle", cmd_args, info);
     TracePrintf(1, "Loaded idle\n");
-    // ContextSwitch(MyCFunc, init->ctx, init, init);
-    // TracePrintf(1, "cloned init\n");
     ContextSwitch(MySwitchFunc, init->ctx, idle, init);
     TracePrintf(1,"Switched Context idle to init - running_proc pid: %d\n", running_proc->pid);
     if (running_proc->pid == 1) {
@@ -758,7 +755,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>> pages already allocated to this process that will be
     // >>>> freed below before we allocate the needed pages for
     // >>>> the new program being loaded.
-    // EDITED
+
     if (text_npg + data_bss_npg + stack_npg > num_free_pfn) {
         TracePrintf(0,
             "LoadProgram: program '%s' size too large for physical memory\n",
@@ -787,17 +784,11 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     for (i = 0; i < PAGE_TABLE_LEN; i++) {
         struct pte entry = r0_page_table[i];
         // Check to see if the memory should be freed and free the memory, setting the valid bit to 0
-        // TracePrintf(1, "PTE num: %d\n", i);
-        // if (entry.valid && (entry.pfn * PAGESIZE < KERNEL_STACK_BASE)  || (entry.pfn * PAGESIZE) > KERNEL_STACK_LIMIT)) {
+        
         if (entry.valid && (i * PAGESIZE < KERNEL_STACK_BASE || i * PAGESIZE > KERNEL_STACK_LIMIT)) {
             entry.valid = 0;
-            // TracePrintf(1, "PUSHING back pfn: %d\n", entry.pfn);
+            
             pfnpush(entry.pfn);
-            // struct pfn_list_entry new_pfn_entry;
-            // new_pfn_entry.pfn = entry.pfn;
-            // new_pfn_entry.next = &free_pfn_head;
-            // free_pfn_head = new_pfn_entry;
-            // num_free_pfn ++;
         }
     }
 
@@ -839,9 +830,6 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         r0_page_table[vpn].pfn = pfnpop();
         TracePrintf(1, "VPN: %d\t PFN: %d\t addr: %x\n", vpn, r0_page_table[vpn].pfn, r0_page_table[vpn].pfn * PAGESIZE);
         vpn ++;
-        // free_pfn_head.pfn;
-        // free_pfn_head = free_pfn_head.next;
-        // num_free_pfn --;
     }
 
 
@@ -954,7 +942,6 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
     // >>>> current process to 0.
     // >>>> Initialize psr for the current process to 0.
     for(i=0; i<NUM_REGS; i++) {
-        // TracePrintf(1, "i: %d", i);
         info->regs[i] = 0;
     }
     info->psr = 0;
@@ -997,7 +984,6 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     TracePrintf(1, "CONTEXT SWITCH pid  %d to %d\n", pcb1->pid, pcb2->pid);
 
     // Save current r0 page table to PCB1
-    // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
     if (delay_head->proc != NULL)
         TracePrintf(1, "1 - delay_head pid1: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
     if (pcb2->init == 0) {
@@ -1046,7 +1032,6 @@ copyKernelStack(struct pcb *proc) {
         memcpy((void*)(uintptr_t)(vpn * PAGESIZE), (void*)(uintptr_t)KERNEL_STACK_BASE + (_i * PAGESIZE), PAGESIZE);
         WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
     }
-    // TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
     r0_page_table[vpn].valid = 0;
     r0_page_table[vpn].pfn = temp_pfn;
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
@@ -1076,10 +1061,8 @@ copyRegion0(struct pcb *proc) {
             WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
         }
     }
-    // TracePrintf(1, "r0_pointer[508].pfn: %d\n", proc->r0_pointer[508].pfn);
     r0_page_table[vpn].valid = 0;
     r0_page_table[vpn].pfn = temp_pfn;
-    // TracePrintf(1, "r0_page_table[508].valid: %d\n", r0_page_table[508].valid);
     WriteRegister(REG_TLB_FLUSH, (RCS421RegVal) (vpn * PAGESIZE));
 }
 
@@ -1093,13 +1076,9 @@ MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     TracePrintf(1, "kernel_brk: %x\n", kernel_brk);
     int vpn = (unsigned long) kernel_brk / PAGESIZE - PAGE_TABLE_LEN;
-    // int vpn = PAGE_TABLE_LEN - 1 - num_r0s_made;
-//     int vpn = (int) kernel_brk / PAGESIZE - PAGE_TABLE_LEN;
-// >>>>>>> e30d1e1cad1c250db6cff4da2c6e7c8cc03a99e9
     r1_page_table[vpn].valid = 1;
     r1_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
     r1_page_table[vpn].pfn = pfnpop();
-    // pcb2->r0_pointer = (VMEM_1_LIMIT) - ((num_r0s_made + 1) * PAGESIZE);
     pcb2->r0_pointer = kernel_brk;
     memset(pcb2->r0_pointer, 0, PAGESIZE);
     TracePrintf(1, "pcb2->r0_pointer[64].pfn: %d\n", pcb2->r0_pointer[64].pfn);
@@ -1145,21 +1124,20 @@ _Fork() {
     child_proc->brk = running_proc->brk;
     child_proc->parent = running_proc;
     child_proc->sp = running_proc->sp;
-    // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
+
     TracePrintf(1, "r0_page_table[504].valid: %x\n", r0_page_table[504].valid);
     ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
     TracePrintf(1, "child_proc->r0_pointer[508].pfn: %d\n", child_proc->r0_pointer[508].pfn);
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "SWITCHED\n");
-    // TracePrintf(1, "CURRENT READY QUEUE: %d\n", ready_head->proc->pid);
+   
     if (running_proc->pid == new_pid){
         TracePrintf(1, "FORK RETURN CHILD\n");
         return 0;
     } else {
         TracePrintf(1, "FORK RETURN PARENT\n");
         running_proc -> num_children ++;
-        // TracePrintf(1, "delay_head pid: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
         return new_pid;
     }
 }
@@ -1167,8 +1145,6 @@ _Fork() {
 int
 _Exec(char *filename, char **argvec, ExceptionInfo *info) {
     TracePrintf(1, "EXEC\n");
-    // running_proc->init=1;
-    // ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, running_proc);
     int val = LoadProgram(filename, argvec, info);
     if (val < 0) {
     	return ERROR;
@@ -1230,10 +1206,8 @@ _Exit(int status) {
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, next_proc);
 
     }
-
-    //TODO, CLEAR MEMORY
     ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
-
+    exit(0);
 
 }
 
@@ -1282,11 +1256,9 @@ _GetPid() {
 int
 _Brk(void *addr) {
     TracePrintf(1, "BRK\n");
-    // if (brk > running_proc->brk) {
     int num_pages = (UP_TO_PAGE(addr) - UP_TO_PAGE(running_proc->brk)) / PAGESIZE;
     if (num_pages > 0) {
         TracePrintf(1, "Allocating for proc pid: %d\n", running_proc->pid);
-        // TracePrintf(1, "Running proc pid: %d\n", running_proc -> pid);
 
         TracePrintf(1, "Current brk: %x\tnext brk: %x\tnum pages needed: %d\n", running_proc->brk, addr, num_pages);
 
@@ -1328,7 +1300,6 @@ _Brk(void *addr) {
         }
     }
     TracePrintf(1, "New brk: %x\n", running_proc->brk);
-    // }
     return 0;
 }
 
@@ -1384,7 +1355,6 @@ _TtyWrite(int tty_id, void *buf, int len) {
         TtyTransmit(tty_id, charbuf, len);
         return len;
     } else {
-        // ttybufwrite_qpush(tty_id, charbuf);
         ttywrite_qpush(tty_id, running_proc);
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
         TtyTransmit(tty_id, charbuf, len);
@@ -1565,8 +1535,6 @@ void trap_illegal_handler(ExceptionInfo *info) {
 void trap_memory_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: Memory\n");
     if (info -> code == TRAP_MEMORY_MAPERR) {
-        // printf("%s%p\n", "No mapping at addr: ", info->addr);
-        // TracePrintf(1, "addr: %x,\tpc: %x\tsp: %x\t\n", info->addr, info->pc, info->sp);
         int vpn = (int)(uintptr_t)info->sp / PAGESIZE;
         r0_page_table[vpn].valid = 1;
         r0_page_table[vpn].kprot = PROT_WRITE | PROT_READ;
@@ -1680,8 +1648,6 @@ void trap_tty_receive_handler(ExceptionInfo *info) {
     free(buf1);
 
     ttybufread_qpush(tty_id, buf2, len);
-
-    //TODO: store return for TtyReceive in kernel stack?
 
     if(term[tty_id].reading_head->proc == NULL) {
         struct pcb *proc = ttyread_qpop(tty_id);
