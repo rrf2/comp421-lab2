@@ -125,6 +125,8 @@ int write_flag[NUM_TERMINALS];
 
 struct buf_queue_elem buf_dummy;
 
+int num_writing_procs = 0;
+
 struct terminal {
 	struct buf_queue_elem *writing_buffer_head;
     struct buf_queue_elem *writing_buffer_tail;
@@ -135,6 +137,8 @@ struct terminal {
 	struct queue_elem *reading_tail;
 	struct queue_elem *writing_head;
 	struct queue_elem *writing_tail;
+
+    struct pcb *writeproc;
 };
 
 struct terminal term[NUM_TERMINALS];
@@ -245,7 +249,7 @@ delay_qpush(struct pcb *proc) {
     new_queue_elem -> proc = malloc(sizeof(struct pcb));
     if (new_queue_elem -> proc == NULL) {
     	errorFunc();
-    } 
+    }
 
     new_queue_elem -> proc = proc;
 
@@ -995,6 +999,7 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     struct pcb *pcb2 = (struct pcb*)p2;
 
     TracePrintf(1, "CONTEXT SWITCH pid  %d to %d\n", pcb1->pid, pcb2->pid);
+    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -1002,25 +1007,21 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
         TracePrintf(1, "1 - delay_head pid1: %d end_of_delay: %d\n", delay_head->proc->pid, delay_head->proc->end_of_delay);
     if (pcb2->init == 0) {
         pcb2->init = 1;
+        TracePrintf(1, "COPYING KERNEL STACK\n");
         copyKernelStack(pcb2);
     }
 
     r0_page_table = pcb2->r0_pointer;
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
 
-    TracePrintf(1, "r0_page_table: %x\n", r0_page_table);
-    TracePrintf(1, "DOWN_TO_PAGE(r0_page_table): %x\n", DOWN_TO_PAGE(r0_page_table));
-    TracePrintf(1, "DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN: %d\n", DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
-    TracePrintf(1, "r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn: %d\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
-    TracePrintf(1, "physaddr: %x\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE);
     physaddr += (int)(uintptr_t)r0_page_table & PAGEOFFSET;
-  
+
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
-    TracePrintf(1, "r0_page_table[65].valid/pfn: %d / %d\n", r0_page_table[65].valid, r0_page_table[65].pfn);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
     if (pcb1 -> pid != 0 && pcb1->queue) {
     	ready_qpush(pcb1);
     }
+    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
     running_proc = pcb2;
     return pcb2->ctx;
 }
@@ -1102,9 +1103,9 @@ MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
     // pcb2->r0_pointer = (VMEM_1_LIMIT) - ((num_r0s_made + 1) * PAGESIZE);
     pcb2->r0_pointer = kernel_brk;
     memset(pcb2->r0_pointer, 0, PAGESIZE);
-    TracePrintf(1, "pcb2->r0_pointer[64].pfn: %d\n", pcb2->r0_pointer[64].pfn);
     kernel_brk += PAGESIZE;
     TracePrintf(1, "Set r0_pointer to vpn: %d, new kernel_brk: %x with pfn: %d\n", vpn, kernel_brk, r1_page_table[vpn].pfn);
+
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
 
     copyRegion0(pcb2);
@@ -1144,9 +1145,7 @@ _Fork() {
     child_proc->init = 1;
     child_proc->brk = running_proc->brk;
     child_proc->parent = running_proc;
-    child_proc->sp = running_proc->sp;
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
-    TracePrintf(1, "r0_page_table[504].valid: %x\n", r0_page_table[504].valid);
     ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
     TracePrintf(1, "child_proc->r0_pointer[508].pfn: %d\n", child_proc->r0_pointer[508].pfn);
@@ -1217,7 +1216,7 @@ _Exit(int status) {
     }
 
     struct pcb *next_proc = ready_qpop();
-    if (next_proc->pid == 0) {
+    if (next_proc->pid == 0 && num_writing_procs == 0) {
         TracePrintf(1, "Num delay procs: %d\n", num_delay_procs);
         if (num_delay_procs > 0) {
             ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, idle);
@@ -1379,15 +1378,22 @@ _TtyWrite(int tty_id, void *buf, int len) {
     }
     memcpy(charbuf, buf, len);
 
-    if (term[tty_id].writing_head->proc == NULL && write_flag == 0) {
-        write_flag[tty_id] = 1;
+    if (term[tty_id].writing_head->proc == NULL) {
         TtyTransmit(tty_id, charbuf, len);
+        _Delay(1);
+        // term[tty_id].writeproc = running_proc;
+        // num_writing_procs ++;
+        // TracePrintf(1, "CONTEXT SWITCHING AFTER WRITE\n");
+        // ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
         return len;
     } else {
         // ttybufwrite_qpush(tty_id, charbuf);
         ttywrite_qpush(tty_id, running_proc);
         ContextSwitch(MySwitchFunc, running_proc->ctx, running_proc, ready_qpop());
         TtyTransmit(tty_id, charbuf, len);
+        _Delay(1);
+        // term[tty_id].writeproc = running_proc;
+        // num_writing_procs ++;
         return len;
     }
 }
@@ -1573,6 +1579,7 @@ void trap_memory_handler(ExceptionInfo *info) {
         r0_page_table[vpn].uprot = PROT_WRITE | PROT_READ;
         r0_page_table[vpn].pfn = pfnpop();
         TracePrintf(1, "Grew user stack with vpn: %d  into pfn: %d\n", vpn, r0_page_table[vpn].pfn);
+        WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
         return;
     }
 
@@ -1670,7 +1677,7 @@ void trap_tty_receive_handler(ExceptionInfo *info) {
     if (buf1 == NULL) {
     	errorFunc();
     }
-       
+
     int len = TtyReceive(tty_id, buf1, TERMINAL_MAX_LINE);
     char *buf2 = malloc(len);
     if (buf2 == NULL) {
@@ -1698,10 +1705,13 @@ void trap_tty_transmit_handler(ExceptionInfo *info) {
 
     TracePrintf(1, "Exception: TTY Transmit\n");
     int tty_id = info -> code;
-    write_flag[tty_id] = 0;
+    // ready_qpush(term[tty_id].writeproc);
+    // num_writing_procs --;
+    // term[tty_id].writeproc = NULL;
     if (term[tty_id].writing_head->proc != NULL)
     {
         ready_qpush(ttywrite_qpop(tty_id));
+        TracePrintf(1, "CONTEXT SWITCHING AFTER TRANSMIT \n");
         ContextSwitch(MySwitchFunc, running_proc -> ctx, running_proc, ready_qpop());
     }
 

@@ -6,7 +6,7 @@ int
 main() {
 	TracePrintf(1, "IDLE\n");
 	while(1) {
-		printf("%s\n", "idle...\n");
+		// printf("%s\n", "idle...\n");
 		Pause();
 	}
 }
