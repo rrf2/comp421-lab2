@@ -25,7 +25,7 @@
 #	For example, the Makefile will make test1 out of test1.c,
 #	if you have a file named test1.c in this directory.
 #
-ALL = yalnix init idle initbasic delaytest forktest0 forktest1 forktest1b forktest2 forktest2b forktest3 init_ waittest exectest delaytest brktest ttyread1 forkwait0c forkwait0p forkwait1 forkwait1b forkwait1c forkwait1d ttyread1 ttywrite1 ttywrite2 ttywrite3 init
+ALL = yalnix init idle initbasic delaytest forktest0 forktest1 forktest1b forktest2 forktest2b forktest3 init_ waittest exectest delaytest brktest ttyread1 forkwait0c forkwait0p forkwait1 forkwait1b forkwait1c forkwait1d ttyread1 ttywrite1 ttywrite2 init console shell ttywrite3 bigstack blowstack
 
 #
 #	You must modify the KERNEL_OBJS and KERNEL_SRCS definitions

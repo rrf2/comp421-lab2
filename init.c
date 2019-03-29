@@ -13,16 +13,16 @@ StartTerminal(int i)
     int pid;
 
     if (i == TTY_CONSOLE)
-	cmd_argv[0] = "console";
+		cmd_argv[0] = "console";
     else
-	cmd_argv[0] = "shell";
+		cmd_argv[0] = "shell";
     sprintf(numbuf, "%d", i);
     cmd_argv[1] = numbuf;
     cmd_argv[2] = NULL;
 
-    TracePrintf(0, "Pid %d calling Fork\n", GetPid());
+    TracePrintf(1, "Pid %d calling Fork\n", GetPid());
     pid = Fork();
-    TracePrintf(0, "Pid %d got %d from Fork\n", GetPid(), pid);
+    TracePrintf(1, "Pid %d got %d from Fork\n", GetPid(), pid);
 
     if (pid < 0) {
 	TtyPrintf(TTY_CONSOLE,
@@ -31,12 +31,12 @@ StartTerminal(int i)
     }
 
     if (pid == 0) {
-	Exec(cmd_argv[0], cmd_argv);
-	TtyPrintf(TTY_CONSOLE,
-	    "Cannot Exec control program for terminal %d.\n", i);
-	Exit(1);
+    	printf("Calling %s\n", cmd_argv[0]);
+		Exec(cmd_argv[0], cmd_argv);
+		TtyPrintf(TTY_CONSOLE,
+		    "Cannot Exec control program for terminal %d.\n", i);
+		Exit(1);
     }
-
     TtyPrintf(TTY_CONSOLE, "Started pid %d on terminal %d\n", pid, i);
     return (pid);
 }

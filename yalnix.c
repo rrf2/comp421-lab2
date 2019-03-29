@@ -31,10 +31,10 @@ struct pcb {
     int exited;
 
     int end_of_delay;
-
     int num_children;
-
     int waiting;
+    unsigned long sp;
+
 };
 
 struct queue_elem {
@@ -119,7 +119,11 @@ struct queue_elem *delay_head = &dummy;
 struct queue_elem *delay_tail = &dummy;
 int num_delay_procs = 0;
 
+int write_flag[NUM_TERMINALS];
+
 struct buf_queue_elem buf_dummy;
+
+int num_r0s_made = 0;
 
 // <<<<<<< HEAD
 // struct queue_elem *ttyread_head[NUM_TERMINALS];
@@ -401,7 +405,7 @@ ttybufwrite_qpush(int tty_id, char *buf, int len) {
     int next_proc_pid = -1;
 }
 
-struct pcb*
+char*
 ttybufread_qpop(int tty_id) {
     char *buf = term[tty_id].reading_buffer_head->buf;
     if (buf != NULL) {
@@ -417,7 +421,7 @@ ttybufread_qpop(int tty_id) {
     return buf;
 }
 
-struct pcb*
+char*
 ttybufwrite_qpop(int tty_id) {
     char *buf = term[tty_id].writing_buffer_head->buf;
     if (buf != NULL) {
@@ -578,6 +582,8 @@ KernelStart(ExceptionInfo *info, unsigned int pmem_size, void *orig_brk, char **
     pid_counter++;
     init->ctx = malloc(sizeof(SavedContext));
     init -> r0_pointer = malloc(PAGE_TABLE_LEN * sizeof(struct pte));
+    init->sp = info->sp;
+    TracePrintf(1, "Init sp: %x\n", init->sp);
     memcpy(init->r0_pointer, &initial_r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
     // TracePrintf(1, "malloc\n");
 
@@ -937,6 +943,7 @@ LoadProgram(char *name, char **args, ExceptionInfo *info)
         info->regs[i] = 0;
     }
     info->psr = 0;
+    TracePrintf(1, "r0_page_table[504].valid: %x\n", r0_page_table[504].valid);
     TracePrintf(1, "Finished loading program\n");
     return (0);
 }
@@ -973,9 +980,6 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
     struct pcb *pcb2 = (struct pcb*)p2;
 
     TracePrintf(1, "CONTEXT SWITCH pid  %d to %d\n", pcb1->pid, pcb2->pid);
-    TracePrintf(1, "ctxp: %x\n", ctxp);
-    TracePrintf(1, "pcb1->r0_pointer[508].pfn: %d\n", pcb1->r0_pointer[508].pfn);
-    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
 
     // Save current r0 page table to PCB1
     // memcpy(pcb1->r0_pointer, &r0_page_table, PAGE_TABLE_LEN * sizeof(struct pte));
@@ -986,30 +990,16 @@ MySwitchFunc(SavedContext *ctxp, void *p1, void *p2) {
         copyKernelStack(pcb2);
     }
 
-    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
-    TracePrintf(1, "pcb2->r0_pointer[508].pfn: %d\n", pcb2->r0_pointer[508].pfn);
-
     r0_page_table = pcb2->r0_pointer;
-    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
     int physaddr = r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE;
-    TracePrintf(1, "r0_page_table: %x\n", r0_page_table);
-    TracePrintf(1, "DOWN_TO_PAGE(r0_page_table): %x\n", DOWN_TO_PAGE(r0_page_table));
-    TracePrintf(1, "DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN: %d\n", DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN);
-    TracePrintf(1, "r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn: %d\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn);
-    TracePrintf(1, "physaddr: %x\n", r1_page_table[DOWN_TO_PAGE(r0_page_table) / PAGESIZE - PAGE_TABLE_LEN].pfn * PAGESIZE);
     physaddr += (int)r0_page_table & PAGEOFFSET;
     WriteRegister(REG_PTR0, (RCS421RegVal) physaddr);
-    TracePrintf(1, "r0_page_table[508].valid: %d\n", r0_page_table[508].valid);
+    TracePrintf(1, "r0_page_table[65].valid/pfn: %d / %d\n", r0_page_table[65].valid, r0_page_table[65].pfn);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_0);
-    TracePrintf(1, "r0_page_table[508].pfn: %d\n", r0_page_table[508].pfn);
     if (pcb1 -> pid != 0 && pcb1->queue) {
     	ready_qpush(pcb1);
     }
     running_proc = pcb2;
-    TracePrintf(1, "pcb2 addr: %x\n", pcb2);
-    TracePrintf(1, "init addr: %x\n", init);
-    TracePrintf(1, "init->ctx addr: %x\n", init->ctx);
-    TracePrintf(1, "pcb2->ctx addr: %x\n", pcb2->ctx);
     return pcb2->ctx;
 }
 
@@ -1075,23 +1065,22 @@ SavedContext*
 MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
     struct pcb *pcb1 = (struct pcb*)p1;
     struct pcb *pcb2 = (struct pcb*)p2;
-    TracePrintf(1, "CLONGING pid: %d\n", pcb2->pid);
-    TracePrintf(1, "ctxp: %x\n", ctxp);
+    TracePrintf(1, "CLONING pid: %d\n", pcb2->pid);
 
-    TracePrintf(1, "kernel_brk: %x\n", kernel_brk);
+
+    // int vpn = PAGE_TABLE_LEN - 1 - num_r0s_made;
     int vpn = (int) kernel_brk / PAGESIZE - PAGE_TABLE_LEN;
     r1_page_table[vpn].valid = 1;
     r1_page_table[vpn].kprot = PROT_READ | PROT_WRITE;
     r1_page_table[vpn].pfn = pfnpop();
+    // pcb2->r0_pointer = (VMEM_1_LIMIT) - ((num_r0s_made + 1) * PAGESIZE);
     pcb2->r0_pointer = kernel_brk;
+    memset(pcb2->r0_pointer, 0, PAGESIZE);
+    TracePrintf(1, "pcb2->r0_pointer[64].pfn: %d\n", pcb2->r0_pointer[64].pfn);
     kernel_brk += PAGESIZE;
     TracePrintf(1, "Set r0_pointer to vpn: %d, new kernel_brk: %x with pfn: %d\n", vpn, kernel_brk, r1_page_table[vpn].pfn);
-    TracePrintf(1, "vpn - 1, valid: %d, %d\n", vpn - 1, r1_page_table[vpn - 1].valid);
     WriteRegister(REG_TLB_FLUSH, TLB_FLUSH_1);
-
-    // UP_TO_PAGE(malloc(PAGE_TABLE_LEN * sizeof(struct pte)));
-
-    // memcpy(pcb2->r0_pointer, pcb1->r0_pointer, PAGE_TABLE_LEN * sizeof(struct pte));
+    num_r0s_made ++;
 
     copyRegion0(pcb2);
     TracePrintf(1, "Finished copying kernel stack\n");
@@ -1102,6 +1091,7 @@ MyCloneFunc(SavedContext *ctxp, void *p1, void *p2) {
 
     TracePrintf(1, "Returning from MyCloneFunc\n");
     TracePrintf(1, "pcb2->ctx: %x\n", ctxp);
+    TracePrintf(1, "pcb2->r0_pointer[64].pfn: %d\n", pcb2->r0_pointer[64].pfn);
 
     return pcb2->ctx;
 }
@@ -1118,8 +1108,10 @@ _Fork() {
     child_proc->pid = new_pid;
     child_proc->init = 1;
     child_proc->brk = running_proc->brk;
-    child_proc -> parent = running_proc;
+    child_proc->parent = running_proc;
+    child_proc->sp = running_proc->sp;
     // ContextSwitch(&running_proc->ctx, running_proc, running_proc);
+    TracePrintf(1, "r0_page_table[504].valid: %x\n", r0_page_table[504].valid);
     ContextSwitch(MyCloneFunc, child_proc->ctx, running_proc, child_proc);
     TracePrintf(1, "between switches\n");
     TracePrintf(1, "child_proc->r0_pointer[508].pfn: %d\n", child_proc->r0_pointer[508].pfn);
@@ -1346,7 +1338,8 @@ _TtyWrite(int tty_id, void *buf, int len) {
     char *charbuf = malloc(len);
     memcpy(charbuf, buf, len);
 
-    if (term[tty_id].writing_head->proc == NULL) {
+    if (term[tty_id].writing_head->proc == NULL && write_flag == 0) {
+        write_flag[tty_id] = 1;
         TtyTransmit(tty_id, charbuf, len);
         return len;
     } else {
@@ -1516,10 +1509,14 @@ void trap_illegal_handler(ExceptionInfo *info) {
 void trap_memory_handler(ExceptionInfo *info) {
     TracePrintf(1, "Exception: Memory\n");
     if (info -> code == TRAP_MEMORY_MAPERR) {
-        printf("%s%p\n", "No mapping at addr: ", info->addr);
-        TracePrintf(1, "addr: %x,\tpc: %x\tsp: %x\t\n", info->addr, info->pc, info->sp);
-        // TracePrintf(1, "addr: ")
-        Halt();
+        // printf("%s%p\n", "No mapping at addr: ", info->addr);
+        // TracePrintf(1, "addr: %x,\tpc: %x\tsp: %x\t\n", info->addr, info->pc, info->sp);
+        int vpn = (int)info->sp / PAGESIZE;
+        r0_page_table[vpn].valid = 1;
+        r0_page_table[vpn].kprot = PROT_WRITE | PROT_READ;
+        r0_page_table[vpn].uprot = PROT_WRITE | PROT_READ;
+        r0_page_table[vpn].pfn = pfnpop();
+        TracePrintf(1, "Grew user stack with vpn: %d  into pfn: %d\n", vpn, r0_page_table[vpn].pfn);
         return;
     }
 
@@ -1629,6 +1626,7 @@ void trap_tty_transmit_handler(ExceptionInfo *info) {
 
     TracePrintf(1, "Exception: TTY Transmit\n");
     int tty_id = info -> code;
+    write_flag[tty_id] = 0;
     if (term[tty_id].writing_head->proc != NULL)
     {
         ready_qpush(ttywrite_qpop(tty_id));
